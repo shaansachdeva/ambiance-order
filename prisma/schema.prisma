@@ -1,0 +1,147 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  username  String   @unique
+  password  String
+  role      String   // ADMIN, SALES, PRODUCTION, DISPATCH, ACCOUNTANT
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  ordersCreated Order[]            @relation("CreatedBy")
+  statusChanges OrderStatusLog[]   @relation("ChangedBy")
+  comments      OrderComment[]     @relation("UserComments")
+  attachments   OrderAttachment[]  @relation("UserAttachments")
+  stockChanges  StockLog[]         @relation("UserStockChanges")
+}
+
+model Customer {
+  id        String   @id @default(cuid())
+  partyName String
+  location  String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  orders Order[]
+}
+
+model Order {
+  id              String    @id @default(cuid())
+  orderId         String    @unique // ORD-0001, ORD-0002, etc.
+  productCategory String    // BOPP_TAPE, BOPP_JUMBO, THERMAL_ROLL, BARCODE_LABEL, COMPUTER_STATIONERY (legacy single-item)
+  status          String    @default("ORDER_PLACED") // ORDER_PLACED, CONFIRMED, IN_PRODUCTION, RAW_MATERIAL_NA, READY_FOR_DISPATCH, DISPATCHED
+
+  // Customer
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+
+  // Product-specific details stored as JSON (legacy single-item)
+  productDetails String // JSON string with product-specific fields
+
+  // Common fields
+  remarks          String?
+  deliveryDeadline DateTime?
+  challanNumber    String?
+  jumboCode        String?
+
+  // Priority
+  priority String @default("NORMAL") // NORMAL, URGENT
+
+  // Production stages (JSON: { printing: bool, cutting: bool, slitting: bool })
+  productionStages String?
+
+  // Tracking
+  createdById String
+  createdBy   User     @relation("CreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  statusLogs  OrderStatusLog[]
+  items       OrderItem[]
+  comments    OrderComment[]
+  attachments OrderAttachment[]
+}
+
+model OrderStatusLog {
+  id        String   @id @default(cuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id])
+  fromStatus String
+  toStatus   String
+  notes     String?
+  changedById String
+  changedBy   User     @relation("ChangedBy", fields: [changedById], references: [id])
+  changedAt   DateTime @default(now())
+}
+
+model Counter {
+  id    String @id @default("order_counter")
+  value Int    @default(0)
+}
+
+model OrderItem {
+  id              String   @id @default(cuid())
+  orderId         String
+  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productCategory String
+  productDetails  String   // JSON
+  rate            Float?
+  amount          Float?
+  createdAt       DateTime @default(now())
+}
+
+model OrderComment {
+  id        String   @id @default(cuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation("UserComments", fields: [userId], references: [id])
+  text      String
+  createdAt DateTime @default(now())
+}
+
+model OrderAttachment {
+  id        String   @id @default(cuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation("UserAttachments", fields: [userId], references: [id])
+  fileName  String
+  filePath  String
+  fileType  String
+  createdAt DateTime @default(now())
+}
+
+model RawMaterial {
+  id           String     @id @default(cuid())
+  name         String
+  category     String     // BOPP_FILM, ADHESIVE, CORE, THERMAL_PAPER, LABEL_STOCK, etc.
+  unit         String     // kg, rolls, pieces, meters
+  currentStock Float      @default(0)
+  minStock     Float      @default(0)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  logs         StockLog[]
+}
+
+model StockLog {
+  id           String      @id @default(cuid())
+  materialId   String
+  material     RawMaterial @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  type         String      // IN, OUT
+  quantity     Float
+  notes        String?
+  userId       String
+  user         User        @relation("UserStockChanges", fields: [userId], references: [id])
+  createdAt    DateTime    @default(now())
+}
