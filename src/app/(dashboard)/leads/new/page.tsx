@@ -290,7 +290,7 @@ export default function NewLeadPage() {
             Visit Proof
           </h2>
           <p className="text-xs text-gray-500 -mt-2">
-            Take a photo at the client's location. Your GPS location and visit time will be recorded automatically.
+            Take a photo at the client&apos;s location. Your GPS location and visit time will be recorded automatically.
           </p>
 
           {/* Location Status */}

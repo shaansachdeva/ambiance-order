@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
       // SALES can only delete their own leads; ADMIN can delete any
       const userId = (session.user as any).id;
 
-      let where: any = { id: { in: ids } };
+      const where: any = { id: { in: ids } };
       if (userRole === "SALES") {
         where.salesPersonId = userId;
       }

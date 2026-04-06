@@ -92,11 +92,6 @@ export default function CalculatorPage() {
   const router = useRouter();
   const userRole = ((session?.user as any)?.role || "") as UserRole;
 
-  if (session && userRole !== "ADMIN") {
-    router.replace("/");
-    return null;
-  }
-
   const [width,          setWidth]          = useState(D.width);
   const [constant,       setConstant]       = useState(D.constant);
   const [micron,         setMicron]         = useState(D.micron);
@@ -148,6 +143,11 @@ export default function CalculatorPage() {
     setGst(D.gst); setCashPercent(D.cashPercent); setPcs(D.pcs);
   };
 
+  if (session && userRole !== "ADMIN") {
+    router.replace("/");
+    return null;
+  }
+
   return (
     <div className="calc-page max-w-4xl mx-auto space-y-4">
       <div className="flex items-center justify-between">
@@ -192,7 +192,7 @@ export default function CalculatorPage() {
               onBlur={(e) => { if (!e.target.value) setConstant("0"); }}
               className="w-full px-3 py-2.5 text-sm border border-brand-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-brand-50"
             />
-            <p className="text-[10px] text-gray-400 mt-0.5">0.0144 for most sizes · 0.015 for 2.5"</p>
+            <p className="text-[10px] text-gray-400 mt-0.5">0.0144 for most sizes · 0.015 for 2.5&quot;</p>
           </div>
 
           {/* Micron — free text */}
