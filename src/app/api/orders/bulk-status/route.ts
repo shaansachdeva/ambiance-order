@@ -25,24 +25,39 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: "orderIds and status are required" }, { status: 400 });
     }
 
-    // Get current orders
+    // Get current orders with their items
     const orders = await prisma.order.findMany({
       where: { id: { in: orderIds } },
-      select: { id: true, status: true },
+      select: { id: true, status: true, items: { select: { status: true } } },
     });
 
-    // Update all orders and create status logs in a transaction
-    const operations: any[] = [];
-    for (const order of orders) {
-      if (order.status !== status) {
-        operations.push(
-          prisma.order.update({
+    // If targeting READY_FOR_DISPATCH or DISPATCHED, skip orders with blocked items
+    let ordersToUpdate = orders.filter((o) => o.status !== status);
+    let skippedDueToRawMaterial = 0;
+    if (status === "READY_FOR_DISPATCH" || status === "DISPATCHED") {
+      const blockedIds = ordersToUpdate
+        .filter((o) => o.items.some((item) => item.status === "RAW_MATERIAL_NA"))
+        .map((o) => o.id);
+      if (blockedIds.length > 0) {
+        skippedDueToRawMaterial = blockedIds.length;
+        ordersToUpdate = ordersToUpdate.filter((o) => !blockedIds.includes(o.id));
+      }
+    }
+
+    if (ordersToUpdate.length > 0) {
+      // Use callback-based transaction (required for driver adapters)
+      await prisma.$transaction(async (tx) => {
+        for (const order of ordersToUpdate) {
+          await tx.order.update({
             where: { id: order.id },
             data: { status },
-          })
-        );
-        operations.push(
-          prisma.orderStatusLog.create({
+          });
+          // Cascade status to all items in this order
+          await tx.orderItem.updateMany({
+            where: { orderId: order.id },
+            data: { status },
+          });
+          await tx.orderStatusLog.create({
             data: {
               orderId: order.id,
               fromStatus: order.status,
@@ -50,20 +65,14 @@ export async function PATCH(request: NextRequest) {
               notes: notes || "Bulk status update",
               changedById: userId,
             },
-          })
-        );
-      }
+          });
+        }
+      });
     }
 
-    if (operations.length > 0) {
-      await prisma.$transaction(operations);
-    }
-
-    return NextResponse.json({
-      updated: orders.filter((o) => o.status !== status).length,
-    });
-  } catch (error) {
+    return NextResponse.json({ updated: ordersToUpdate.length, skipped: skippedDueToRawMaterial });
+  } catch (error: any) {
     console.error("Error bulk updating status:", error);
-    return NextResponse.json({ error: "Failed to update" }, { status: 500 });
+    return NextResponse.json({ error: "Failed to update", detail: error?.message || String(error) }, { status: 500 });
   }
 }

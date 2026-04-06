@@ -8,6 +8,9 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useLanguage } from "@/contexts/LanguageContext";
+import Link from "next/link";
+import type { TranslationKey } from "@/lib/translations";
 
 interface DashboardStatsProps {
   stats: {
@@ -20,63 +23,64 @@ interface DashboardStatsProps {
 }
 
 interface StatCard {
-  label: string;
+  labelKey: TranslationKey;
   key: keyof DashboardStatsProps["stats"];
   icon: React.ElementType;
   iconColor: string;
   bgColor: string;
+  href?: string;
 }
 
 const STAT_CARDS: StatCard[] = [
   {
-    label: "Pending Orders",
+    labelKey: "dashboard.pendingOrders",
     key: "pendingOrders",
     icon: Package,
     iconColor: "text-brand-600",
     bgColor: "bg-brand-50",
   },
   {
-    label: "Today's Production",
+    labelKey: "dashboard.todaysProduction",
     key: "todaysProduction",
     icon: Factory,
     iconColor: "text-amber-600",
     bgColor: "bg-amber-50",
   },
   {
-    label: "Ready for Dispatch",
+    labelKey: "dashboard.readyForDispatch",
     key: "readyForDispatch",
     icon: CheckCircle2,
     iconColor: "text-green-600",
     bgColor: "bg-green-50",
   },
   {
-    label: "Dispatched",
+    labelKey: "dashboard.dispatched",
     key: "dispatched",
     icon: Truck,
     iconColor: "text-gray-600",
     bgColor: "bg-gray-100",
   },
   {
-    label: "Raw Material N/A",
+    labelKey: "dashboard.rawMaterialNA",
     key: "rawMaterialNA",
     icon: AlertTriangle,
     iconColor: "text-red-600",
     bgColor: "bg-red-50",
+    href: "/orders?status=RAW_MATERIAL_NA",
   },
 ];
 
 export default function DashboardStats({ stats }: DashboardStatsProps) {
+  const { t } = useLanguage();
+
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 md:gap-4">
       {STAT_CARDS.map((card) => {
         const Icon = card.icon;
         const count = stats[card.key];
 
-        return (
-          <div
-            key={card.key}
-            className="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-sm transition-shadow"
-          >
+        const CardContent = (
+          <>
             <div className="flex items-center gap-3 mb-3">
               <div
                 className={cn(
@@ -88,7 +92,28 @@ export default function DashboardStats({ stats }: DashboardStatsProps) {
               </div>
             </div>
             <p className="text-2xl font-bold text-gray-900">{count}</p>
-            <p className="text-xs text-gray-500 mt-0.5">{card.label}</p>
+            <p className="text-xs text-gray-500 mt-0.5">{t(card.labelKey)}</p>
+          </>
+        );
+
+        if (card.href) {
+          return (
+            <Link
+              href={card.href}
+              key={card.key}
+              className="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-sm hover:border-brand-300 transition-all cursor-pointer block"
+            >
+              {CardContent}
+            </Link>
+          );
+        }
+
+        return (
+          <div
+            key={card.key}
+            className="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-sm transition-shadow"
+          >
+            {CardContent}
           </div>
         );
       })}

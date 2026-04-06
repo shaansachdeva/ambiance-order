@@ -18,7 +18,14 @@ export async function GET(
     where: { id: params.id },
     include: {
       customer: true,
-      items: true,
+      items: {
+        include: {
+          statusLogs: {
+            include: { changedBy: { select: { name: true } } },
+            orderBy: { changedAt: "desc" },
+          },
+        },
+      },
       comments: {
         include: {
           user: {
@@ -73,7 +80,7 @@ export async function PATCH(
 
   try {
     const body = await request.json();
-    const { remarks, deliveryDeadline, challanNumber, jumboCode, productDetails, productCategory, productionStages, priority } = body;
+    const { remarks, deliveryDeadline, challanNumber, jumboCode, productDetails, productCategory, productionStages, priority, items, status } = body;
 
     const updateData: any = {};
 
@@ -91,6 +98,7 @@ export async function PATCH(
       if (productCategory !== undefined) updateData.productCategory = productCategory;
       if (productionStages !== undefined) updateData.productionStages = productionStages;
       if (priority !== undefined) updateData.priority = priority;
+      if (status !== undefined) updateData.status = status;
     } else if (userRole === "PRODUCTION") {
       if (jumboCode !== undefined) updateData.jumboCode = jumboCode;
       if (productionStages !== undefined) updateData.productionStages = productionStages;
@@ -107,9 +115,72 @@ export async function PATCH(
       return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
     }
 
-    const order = await prisma.order.update({
+    if (items && Array.isArray(items) && (userRole === "ADMIN" || userRole === "ACCOUNTANT")) {
+      // First update the order's core fields
+      await prisma.order.update({
+        where: { id: params.id },
+        data: updateData,
+      });
+
+      // Use a transaction for items
+      await prisma.$transaction(async (tx) => {
+        // Collect dbIds that remain
+        const remainingDbIds = items.map((i: any) => i.dbId).filter(Boolean);
+        
+        // Delete items that were removed
+        await tx.orderItem.deleteMany({
+          where: { 
+            orderId: params.id,
+            id: { notIn: remainingDbIds.length > 0 ? remainingDbIds : ["none"] }
+          }
+        });
+
+        // Upsert items
+        for (const item of items) {
+          const productDetailsStr = typeof item.productDetails === "string" 
+            ? item.productDetails 
+            : JSON.stringify(item.productDetails || {});
+            
+          if (item.dbId) {
+            await tx.orderItem.update({
+              where: { id: item.dbId },
+              data: {
+                productCategory: item.productCategory,
+                productDetails: productDetailsStr,
+                rate: item.rate || null,
+                gst: item.gst || null,
+              }
+            });
+          } else {
+            await tx.orderItem.create({
+              data: {
+                orderId: params.id,
+                productCategory: item.productCategory,
+                productDetails: productDetailsStr,
+                rate: item.rate || null,
+                gst: item.gst || null,
+              }
+            });
+          }
+        }
+      });
+    } else {
+      await prisma.order.update({
+        where: { id: params.id },
+        data: updateData,
+      });
+    }
+
+    // If status was changed, cascade to all items
+    if (updateData.status) {
+      await prisma.orderItem.updateMany({
+        where: { orderId: params.id },
+        data: { status: updateData.status },
+      });
+    }
+
+    const order = await prisma.order.findUnique({
       where: { id: params.id },
-      data: updateData,
       include: {
         customer: true,
         items: true,
@@ -117,8 +188,36 @@ export async function PATCH(
     });
 
     return NextResponse.json(order);
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error updating order:", error);
-    return NextResponse.json({ error: "Failed to update order" }, { status: 500 });
+    return NextResponse.json({ error: "Failed to update order", detail: error?.message || String(error) }, { status: 500 });
+  }
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const userRole = (session.user as any).role;
+  if (userRole !== "ADMIN") {
+    return NextResponse.json(
+      { error: "Only admins can delete orders" },
+      { status: 403 }
+    );
+  }
+
+  try {
+    // OrderStatusLog lacks onDelete: Cascade, so delete manually first
+    await prisma.orderStatusLog.deleteMany({ where: { orderId: params.id } });
+    await prisma.order.delete({ where: { id: params.id } });
+    return NextResponse.json({ success: true });
+  } catch (error: any) {
+    console.error("Error deleting order:", error);
+    return NextResponse.json({ error: "Failed to delete order", detail: error?.message || String(error) }, { status: 500 });
   }
 }

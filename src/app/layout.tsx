@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import SessionProvider from "@/components/SessionProvider";
+import { LanguageProvider } from "@/contexts/LanguageContext";
 import "./globals.css";
 
 const inter = Inter({
@@ -28,7 +29,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${inter.variable} font-sans antialiased`}>
-        <SessionProvider session={null}>{children}</SessionProvider>
+        <SessionProvider session={null}>
+          <LanguageProvider>{children}</LanguageProvider>
+        </SessionProvider>
       </body>
     </html>
   );

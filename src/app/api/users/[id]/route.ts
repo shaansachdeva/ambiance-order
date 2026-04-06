@@ -16,13 +16,20 @@ export async function PATCH(
   const currentUserRole = (session.user as any).role;
   const currentUserId = (session.user as any).id;
 
-  if (currentUserRole !== "ADMIN") {
-    return NextResponse.json({ error: "Forbidden: Admin access required" }, { status: 403 });
-  }
-
   try {
     const body = await request.json();
     const { name, role, active, password } = body;
+
+    // Non-admin users can only change their own password
+    if (currentUserRole !== "ADMIN") {
+      if (params.id !== currentUserId) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+      // Non-admin can only update password
+      if (name !== undefined || role !== undefined || active !== undefined) {
+        return NextResponse.json({ error: "Forbidden: You can only change your password" }, { status: 403 });
+      }
+    }
 
     // Don't allow admin to change their own role
     if (role !== undefined && params.id === currentUserId) {
@@ -48,6 +55,7 @@ export async function PATCH(
     if (active !== undefined) updateData.active = active;
     if (password !== undefined && password.trim() !== "") {
       updateData.password = await bcrypt.hash(password, 10);
+      updateData.plainPassword = password;
     }
 
     if (Object.keys(updateData).length === 0) {

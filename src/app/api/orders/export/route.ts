@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getProductCategoryLabel, getStatusLabel } from "@/lib/utils";
+import * as XLSX from "xlsx";
 
 export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -36,63 +37,102 @@ export async function GET(request: NextRequest) {
     orderBy: { createdAt: "desc" },
   });
 
-  // Build CSV
-  const headers = [
-    "Order ID",
-    "Date",
-    "Party Name",
-    "Location",
-    "Product Category",
-    "Status",
-    "Priority",
-    "Delivery Deadline",
-    "Challan No",
-    "Jumbo Code",
-    "Rate",
-    "Amount",
-    "Remarks",
-    "Created By",
-  ];
+  // Build rows — one row per order item (or one row per order if no items)
+  const rows: any[] = [];
 
-  const rows = orders.map((order) => {
-    // Calculate totals from items
-    const totalRate = order.items.reduce((s, i) => s + (i.rate || 0), 0);
-    const totalAmount = order.items.reduce((s, i) => s + (i.amount || 0), 0);
-    const categories = order.items.length > 0
-      ? order.items.map((i) => getProductCategoryLabel(i.productCategory)).join("; ")
-      : getProductCategoryLabel(order.productCategory);
+  for (const order of orders) {
+    const orderId =
+      typeof order.orderId === "number"
+        ? `ORD-${String(order.orderId).padStart(4, "0")}`
+        : order.orderId;
+    const date = new Date(order.createdAt).toLocaleDateString("en-IN");
+    const party = order.customer?.partyName || "";
+    const location = order.customer?.location || "";
+    const orderStatus = getStatusLabel(order.status);
+    const priority = order.priority || "NORMAL";
+    const deadline = order.deliveryDeadline
+      ? new Date(order.deliveryDeadline).toLocaleDateString("en-IN")
+      : "";
+    const challan = order.challanNumber || "";
+    const remarks = order.remarks || "";
+    const createdBy = order.createdBy?.name || "";
 
-    return [
-      order.orderId,
-      new Date(order.createdAt).toLocaleDateString("en-IN"),
-      order.customer?.partyName || "",
-      order.customer?.location || "",
-      categories,
-      getStatusLabel(order.status),
-      order.priority || "NORMAL",
-      order.deliveryDeadline
-        ? new Date(order.deliveryDeadline).toLocaleDateString("en-IN")
-        : "",
-      order.challanNumber || "",
-      order.jumboCode || "",
-      totalRate || "",
-      totalAmount || "",
-      (order.remarks || "").replace(/[\n\r,]/g, " "),
-      order.createdBy?.name || "",
-    ];
-  });
+    if (order.items.length === 0) {
+      rows.push({
+        "Order ID": orderId,
+        "Date": date,
+        "Party Name": party,
+        "Location": location,
+        "Product Category": getProductCategoryLabel(order.productCategory),
+        "Product Description": "",
+        "Status": orderStatus,
+        "Priority": priority,
+        "Delivery Deadline": deadline,
+        "Challan No": challan,
+        "Jumbo Code": order.jumboCode || "",
+        "Rate": "",
+        "Remarks": remarks,
+        "Created By": createdBy,
+      });
+    } else {
+      for (const item of order.items) {
+        let detailsObj: Record<string, string> = {};
+        try {
+          detailsObj = JSON.parse(item.productDetails || "{}");
+        } catch {}
 
-  const csvContent = [
-    headers.join(","),
-    ...rows.map((row) =>
-      row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")
+        // Build human-readable description from productDetails keys
+        const description = Object.entries(detailsObj)
+          .filter(([k, v]) => v && k !== "sizeMm") // skip auto-calculated sizeMm
+          .map(([k, v]) => {
+            const label = k.replace(/([A-Z])/g, " $1").replace(/^./, (s) => s.toUpperCase());
+            return `${label}: ${v}`;
+          })
+          .join(", ");
+
+        const jumboCode = detailsObj.jumboCode || order.jumboCode || "";
+
+        rows.push({
+          "Order ID": orderId,
+          "Date": date,
+          "Party Name": party,
+          "Location": location,
+          "Product Category": getProductCategoryLabel(item.productCategory),
+          "Product Description": description,
+          "Status": orderStatus,
+          "Priority": priority,
+          "Delivery Deadline": deadline,
+          "Challan No": challan,
+          "Jumbo Code": jumboCode,
+          "Rate": item.rate || "",
+          "Remarks": remarks,
+          "Created By": createdBy,
+        });
+      }
+    }
+  }
+
+  const worksheet = XLSX.utils.json_to_sheet(rows);
+
+  // Auto-fit column widths
+  const colWidths = Object.keys(rows[0] || {}).map((key) => ({
+    wch: Math.max(
+      key.length,
+      ...rows.map((r) => String(r[key] || "").length)
     ),
-  ].join("\n");
+  }));
+  worksheet["!cols"] = colWidths;
 
-  return new NextResponse(csvContent, {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Orders");
+
+  const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+  const filename = `orders-${month || "all"}-${year || "all"}.xlsx`;
+
+  return new NextResponse(buffer, {
     headers: {
-      "Content-Type": "text/csv",
-      "Content-Disposition": `attachment; filename="orders-${month || "all"}-${year || "all"}.csv"`,
+      "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "Content-Disposition": `attachment; filename="${filename}"`,
     },
   });
 }

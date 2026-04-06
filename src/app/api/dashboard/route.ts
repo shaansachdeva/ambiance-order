@@ -59,9 +59,15 @@ export async function GET() {
         where: { status: "DISPATCHED" },
       }),
 
-      // Raw Material N/A
+      // Raw Material N/A: orders where any item (or the order itself) is RAW_MATERIAL_NA
       prisma.order.count({
-        where: { status: "RAW_MATERIAL_NA" },
+        where: {
+          status: { not: "DISPATCHED" },
+          OR: [
+            { status: "RAW_MATERIAL_NA" },
+            { items: { some: { status: "RAW_MATERIAL_NA" } } },
+          ],
+        },
       }),
 
       // Recent 10 orders with customer

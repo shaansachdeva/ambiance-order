@@ -50,6 +50,20 @@ export async function PATCH(
       );
     }
 
+    // Block progression if any item has raw material issue
+    if (status === "READY_FOR_DISPATCH" || status === "DISPATCHED") {
+      const items = await prisma.orderItem.findMany({
+        where: { orderId: params.id },
+        select: { status: true },
+      });
+      if (items.some((item) => item.status === "RAW_MATERIAL_NA")) {
+        return NextResponse.json(
+          { error: "Cannot proceed: one or more items are blocked due to raw material unavailability. Resolve all material issues first." },
+          { status: 400 }
+        );
+      }
+    }
+
     // Get current order
     const currentOrder = await prisma.order.findUnique({
       where: { id: params.id },
@@ -59,9 +73,9 @@ export async function PATCH(
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }
 
-    // Update order status and create log entry in a transaction
-    const [updatedOrder] = await prisma.$transaction([
-      prisma.order.update({
+    // Update order status, cascade to all items, and create log — all in one transaction
+    const updatedOrder = await prisma.$transaction(async (tx) => {
+      const updated = await tx.order.update({
         where: { id: params.id },
         data: { status },
         include: {
@@ -80,8 +94,15 @@ export async function PATCH(
             orderBy: { changedAt: "desc" },
           },
         },
-      }),
-      prisma.orderStatusLog.create({
+      });
+
+      // Cascade status to all items in this order
+      await tx.orderItem.updateMany({
+        where: { orderId: params.id },
+        data: { status },
+      });
+
+      await tx.orderStatusLog.create({
         data: {
           orderId: params.id,
           fromStatus: currentOrder.status,
@@ -89,12 +110,14 @@ export async function PATCH(
           notes: notes || null,
           changedById: userId,
         },
-      }),
-    ]);
+      });
+
+      return updated;
+    });
 
     return NextResponse.json(updatedOrder);
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error updating order status:", error);
-    return NextResponse.json({ error: "Failed to update order status" }, { status: 500 });
+    return NextResponse.json({ error: "Failed to update order status", detail: error?.message || String(error) }, { status: 500 });
   }
 }

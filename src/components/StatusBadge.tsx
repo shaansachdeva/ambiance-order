@@ -1,5 +1,7 @@
+"use client";
+
 import { cn } from "@/lib/utils";
-import { getStatusLabel } from "@/lib/utils";
+import { useLanguage } from "@/contexts/LanguageContext";
 import type { OrderStatus } from "@/types";
 
 interface StatusBadgeProps {
@@ -42,6 +44,7 @@ const STATUS_STYLES: Record<OrderStatus, { bg: string; text: string; dot: string
 export default function StatusBadge({ status }: StatusBadgeProps) {
   const style = STATUS_STYLES[status] ?? STATUS_STYLES.ORDER_PLACED;
   const isActive = status !== "DISPATCHED";
+  const { tStatus } = useLanguage();
 
   return (
     <span
@@ -67,7 +70,7 @@ export default function StatusBadge({ status }: StatusBadgeProps) {
           )}
         />
       </span>
-      {getStatusLabel(status)}
+      {tStatus(status)}
     </span>
   );
 }

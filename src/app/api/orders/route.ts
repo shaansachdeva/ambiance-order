@@ -19,19 +19,35 @@ export async function GET(request: NextRequest) {
 
   const userRole = (session.user as any).role;
 
-  const where: any = {};
+  const andConditions: any[] = [];
 
-  if (status) where.status = status;
+  if (status === "RAW_MATERIAL_NA") {
+    // Include orders where order-level OR any item is RAW_MATERIAL_NA
+    andConditions.push({
+      OR: [
+        { status: "RAW_MATERIAL_NA" },
+        { items: { some: { status: "RAW_MATERIAL_NA" } } },
+      ],
+    });
+  } else if (status) {
+    andConditions.push({ status });
+  }
+
   if (productCategory) {
     // Search in both order-level and item-level categories
-    where.OR = [
-      { productCategory },
-      { items: { some: { productCategory } } },
-    ];
+    andConditions.push({
+      OR: [
+        { productCategory },
+        { items: { some: { productCategory } } },
+      ],
+    });
   }
-  if (search) where.orderId = { contains: search };
-  if (customerId) where.customerId = customerId;
-  if (priority) where.priority = priority;
+
+  if (search) andConditions.push({ orderId: { contains: search } });
+  if (customerId) andConditions.push({ customerId });
+  if (priority) andConditions.push({ priority });
+
+  const where: any = andConditions.length > 0 ? { AND: andConditions } : {};
 
   const orders = await prisma.order.findMany({
     where,
@@ -121,7 +137,7 @@ export async function POST(request: NextRequest) {
                 ? item.productDetails
                 : JSON.stringify(item.productDetails || {}),
             rate: item.rate || null,
-            amount: item.amount || null,
+            gst: item.gst || null,
           })),
         },
       },
@@ -133,8 +149,8 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json(order, { status: 201 });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error creating order:", error);
-    return NextResponse.json({ error: "Failed to create order" }, { status: 500 });
+    return NextResponse.json({ error: "Failed to create order", detail: error?.message || String(error) }, { status: 500 });
   }
 }

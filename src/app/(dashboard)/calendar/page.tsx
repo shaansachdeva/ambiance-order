@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
-import { hasPermission, formatDate, getProductCategoryLabel, getStatusLabel } from "@/lib/utils";
+import { hasPermission, formatDate, getProductCategoryLabel } from "@/lib/utils";
+import { useLanguage } from "@/contexts/LanguageContext";
 import StatusBadge from "@/components/StatusBadge";
 import type { UserRole, OrderStatus } from "@/types";
+import type { TranslationKey } from "@/lib/translations";
 import {
   Calendar as CalendarIcon,
   ChevronLeft,
@@ -14,10 +16,14 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 
-const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
+const DAY_KEYS: TranslationKey[] = [
+  "calendar.sun", "calendar.mon", "calendar.tue", "calendar.wed",
+  "calendar.thu", "calendar.fri", "calendar.sat",
+];
+const MONTH_KEYS: TranslationKey[] = [
+  "month.january", "month.february", "month.march", "month.april",
+  "month.may", "month.june", "month.july", "month.august",
+  "month.september", "month.october", "month.november", "month.december",
 ];
 
 interface CalendarOrder {
@@ -30,12 +36,21 @@ interface CalendarOrder {
   deliveryDeadline: string;
 }
 
+interface CalendarLead {
+  id: string;
+  companyName: string;
+  nextFollowUp: string;
+  status: string;
+}
+
 export default function CalendarPage() {
   const { data: session } = useSession();
+  const { t, tProduct } = useLanguage();
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth());
   const [year, setYear] = useState(now.getFullYear());
   const [orders, setOrders] = useState<CalendarOrder[]>([]);
+  const [leads, setLeads] = useState<CalendarLead[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
@@ -44,13 +59,17 @@ export default function CalendarPage() {
 
   useEffect(() => {
     setLoading(true);
-    fetch("/api/orders")
-      .then((r) => r.json())
-      .then((data) => {
-        const arr = Array.isArray(data) ? data : [];
-        // Only keep orders with delivery deadlines
-        const withDeadlines = arr.filter((o: any) => o.deliveryDeadline);
-        setOrders(withDeadlines);
+    Promise.all([
+      fetch("/api/orders").then((r) => r.json()),
+      fetch("/api/leads").then((r) => r.json()),
+    ])
+      .then(([ordersData, leadsData]) => {
+        const orderArr = Array.isArray(ordersData) ? ordersData : [];
+        setOrders(orderArr.filter((o: any) => o.deliveryDeadline));
+
+        const leadArr = Array.isArray(leadsData) ? leadsData : [];
+        setLeads(leadArr.filter((l: any) => l.nextFollowUp && l.status !== 'CONVERTED' && l.status !== 'CLOSED_LOST'));
+        
         setLoading(false);
       })
       .catch(() => setLoading(false));
@@ -88,7 +107,15 @@ export default function CalendarPage() {
     ordersByDate[dateStr].push(order);
   }
 
+  const leadsByDate: Record<string, CalendarLead[]> = {};
+  for (const lead of leads) {
+    const dateStr = new Date(lead.nextFollowUp).toISOString().split("T")[0];
+    if (!leadsByDate[dateStr]) leadsByDate[dateStr] = [];
+    leadsByDate[dateStr].push(lead);
+  }
+
   const selectedOrders = selectedDate ? (ordersByDate[selectedDate] || []) : [];
+  const selectedLeads = selectedDate ? (leadsByDate[selectedDate] || []) : [];
 
   return (
     <div className="space-y-4">
@@ -96,7 +123,7 @@ export default function CalendarPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2">
           <CalendarIcon className="w-5 h-5 text-brand-500" />
-          Delivery Calendar
+          {t("calendar.title")}
         </h1>
       </div>
 
@@ -107,7 +134,7 @@ export default function CalendarPage() {
             <ChevronLeft className="w-5 h-5 text-gray-600" />
           </button>
           <h2 className="text-lg font-semibold text-gray-900">
-            {MONTHS[month]} {year}
+            {t(MONTH_KEYS[month])} {year}
           </h2>
           <button onClick={nextMonth} className="p-2 hover:bg-gray-100 rounded-lg">
             <ChevronRight className="w-5 h-5 text-gray-600" />
@@ -116,9 +143,9 @@ export default function CalendarPage() {
 
         {/* Day headers */}
         <div className="grid grid-cols-7 gap-1 mb-1">
-          {DAYS.map((d) => (
-            <div key={d} className="text-center text-xs font-medium text-gray-500 py-1">
-              {d}
+          {DAY_KEYS.map((key) => (
+            <div key={key} className="text-center text-xs font-medium text-gray-500 py-1">
+              {t(key)}
             </div>
           ))}
         </div>
@@ -138,15 +165,20 @@ export default function CalendarPage() {
               const day = i + 1;
               const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
               const dayOrders = ordersByDate[dateStr] || [];
+              const dayLeads = leadsByDate[dateStr] || [];
               const isToday =
                 day === today.getDate() &&
                 month === today.getMonth() &&
                 year === today.getFullYear();
               const isPast = new Date(year, month, day) < today;
-              const hasOverdue = dayOrders.some(
+              const hasOverdueOrder = dayOrders.some(
                 (o) => isPast && o.status !== "DISPATCHED"
               );
+              const hasOverdueLead = dayLeads.some((l) => isPast);
+              const hasOverdue = hasOverdueOrder || hasOverdueLead;
               const isSelected = selectedDate === dateStr;
+
+              const totalItems = dayOrders.length + dayLeads.length;
 
               return (
                 <button
@@ -159,7 +191,7 @@ export default function CalendarPage() {
                       ? "border-brand-300 bg-brand-50/50"
                       : hasOverdue
                       ? "border-red-300 bg-red-50/50"
-                      : dayOrders.length > 0
+                      : totalItems > 0
                       ? "border-gray-200 bg-white hover:border-brand-300"
                       : "border-transparent hover:bg-gray-50"
                   }`}
@@ -175,9 +207,9 @@ export default function CalendarPage() {
                   >
                     {day}
                   </span>
-                  {dayOrders.length > 0 && (
+                  {totalItems > 0 && (
                     <div className="flex flex-wrap gap-0.5 mt-0.5">
-                      {dayOrders.slice(0, 3).map((o) => {
+                      {dayOrders.slice(0, 2).map((o) => {
                         const isOrderOverdue = isPast && o.status !== "DISPATCHED";
                         return (
                           <div
@@ -194,9 +226,12 @@ export default function CalendarPage() {
                           />
                         );
                       })}
-                      {dayOrders.length > 3 && (
+                      {dayLeads.slice(0, 3 - Math.min(dayOrders.length, 2)).map((l) => (
+                        <div key={`lead-${l.id}`} className="w-full h-1.5 rounded-full bg-blue-500" />
+                      ))}
+                      {totalItems > 3 && (
                         <span className="text-[8px] text-gray-400">
-                          +{dayOrders.length - 3}
+                          +{totalItems - 3}
                         </span>
                       )}
                     </div>
@@ -211,16 +246,19 @@ export default function CalendarPage() {
       {/* Legend */}
       <div className="flex items-center gap-4 text-xs text-gray-500">
         <span className="flex items-center gap-1">
-          <div className="w-3 h-1.5 rounded-full bg-brand-400" /> Active
+          <div className="w-3 h-1.5 rounded-full bg-brand-400" /> {t("calendar.activeOrder")}
         </span>
         <span className="flex items-center gap-1">
-          <div className="w-3 h-1.5 rounded-full bg-red-400" /> Overdue
+          <div className="w-3 h-1.5 rounded-full bg-blue-500" /> {t("calendar.followUp")}
         </span>
         <span className="flex items-center gap-1">
-          <div className="w-3 h-1.5 rounded-full bg-orange-400" /> Urgent
+          <div className="w-3 h-1.5 rounded-full bg-red-400" /> {t("calendar.overdue")}
         </span>
         <span className="flex items-center gap-1">
-          <div className="w-3 h-1.5 rounded-full bg-gray-300" /> Dispatched
+          <div className="w-3 h-1.5 rounded-full bg-orange-400" /> {t("calendar.urgent")}
+        </span>
+        <span className="flex items-center gap-1">
+          <div className="w-3 h-1.5 rounded-full bg-gray-300" /> {t("calendar.dispatched")}
         </span>
       </div>
 
@@ -228,49 +266,91 @@ export default function CalendarPage() {
       {selectedDate && (
         <div className="bg-white rounded-xl border border-gray-200 p-4">
           <h2 className="text-sm font-semibold text-gray-900 mb-3">
-            Orders due on {formatDate(selectedDate)} ({selectedOrders.length})
+            Items for {formatDate(selectedDate)}
           </h2>
-          {selectedOrders.length === 0 ? (
-            <p className="text-xs text-gray-500">No orders due on this date.</p>
+          {selectedOrders.length === 0 && selectedLeads.length === 0 ? (
+            <p className="text-xs text-gray-500">No items due on this date.</p>
           ) : (
-            <div className="space-y-2">
-              {selectedOrders.map((order) => {
-                const isPastDue =
-                  new Date(order.deliveryDeadline) < today && order.status !== "DISPATCHED";
-                return (
-                  <Link
-                    key={order.id}
-                    href={`/orders/${order.id}`}
-                    className={`block p-3 rounded-lg border transition-colors hover:border-brand-300 ${
-                      isPastDue ? "border-red-200 bg-red-50/50" : "border-gray-200"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold text-gray-900">{order.orderId}</span>
-                        {order.priority === "URGENT" && (
-                          <Zap className="w-3.5 h-3.5 text-red-500" />
-                        )}
-                        {isPastDue && (
-                          <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full font-bold">
-                            OVERDUE
+            <div className="space-y-4">
+              {selectedOrders.length > 0 && (
+                <div className="space-y-2">
+                  <h3 className="text-xs font-semibold text-gray-500 uppercase">Orders</h3>
+                  {selectedOrders.map((order) => {
+                    const isPastDue =
+                      new Date(order.deliveryDeadline) < today && order.status !== "DISPATCHED";
+                    return (
+                      <Link
+                        key={order.id}
+                        href={`/orders/${order.id}`}
+                        className={`block p-3 rounded-lg border transition-colors hover:border-brand-300 ${
+                          isPastDue ? "border-red-200 bg-red-50/50" : "border-gray-200"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-semibold text-gray-900">{order.orderId}</span>
+                            {order.priority === "URGENT" && (
+                              <Zap className="w-3.5 h-3.5 text-red-500" />
+                            )}
+                            {isPastDue && (
+                              <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full font-bold">
+                                OVERDUE
+                              </span>
+                            )}
+                          </div>
+                          <StatusBadge status={order.status} />
+                        </div>
+                        <div className="flex items-center gap-2 mt-1 text-xs text-gray-500">
+                          <span>{getProductCategoryLabel(order.productCategory)}</span>
+                          {showParty && order.customer && (
+                            <>
+                              <span>·</span>
+                              <span>{order.customer.partyName}</span>
+                            </>
+                          )}
+                        </div>
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+
+              {selectedLeads.length > 0 && (
+                <div className="space-y-2">
+                  <h3 className="text-xs font-semibold text-gray-500 uppercase">Follow-ups</h3>
+                  {selectedLeads.map((lead) => {
+                    const isPastDue = new Date(lead.nextFollowUp) < today;
+                    return (
+                      <Link
+                        key={lead.id}
+                        href={`/leads/${lead.id}`}
+                        className={`block p-3 rounded-lg border transition-colors hover:border-blue-300 ${
+                          isPastDue ? "border-red-200 bg-red-50/50" : "border-blue-100 bg-blue-50/30"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-semibold text-gray-900">{lead.companyName}</span>
+                            {isPastDue && (
+                              <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full font-bold">
+                                OVERDUE
+                              </span>
+                            )}
+                          </div>
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                            lead.status === 'NEW' ? 'bg-blue-100 text-blue-800' : 'bg-yellow-100 text-yellow-800'
+                          }`}>
+                            {lead.status.replace('_', ' ')}
                           </span>
-                        )}
-                      </div>
-                      <StatusBadge status={order.status} />
-                    </div>
-                    <div className="flex items-center gap-2 mt-1 text-xs text-gray-500">
-                      <span>{getProductCategoryLabel(order.productCategory)}</span>
-                      {showParty && order.customer && (
-                        <>
-                          <span>·</span>
-                          <span>{order.customer.partyName}</span>
-                        </>
-                      )}
-                    </div>
-                  </Link>
-                );
-              })}
+                        </div>
+                        <div className="mt-1 text-xs text-gray-500">
+                          Sales Lead Check-in
+                        </div>
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -4,15 +4,16 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
 }
 
 model User {
   id        String   @id @default(cuid())
   name      String
   username  String   @unique
-  password  String
-  role      String   // ADMIN, SALES, PRODUCTION, DISPATCH, ACCOUNTANT
+  password      String
+  plainPassword String?  // Stored for admin visibility
+  role          String   // ADMIN, SALES, PRODUCTION, DISPATCH, ACCOUNTANT
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -22,6 +23,9 @@ model User {
   comments      OrderComment[]     @relation("UserComments")
   attachments   OrderAttachment[]  @relation("UserAttachments")
   stockChanges  StockLog[]         @relation("UserStockChanges")
+  leads         Lead[]             @relation("UserLeads")
+  leadFollowUps LeadFollowUp[]     @relation("UserLeadFollowUps")
+  itemStatusChanges OrderItemStatusLog[] @relation("ItemChangedBy")
 }
 
 model Customer {
@@ -96,8 +100,25 @@ model OrderItem {
   productCategory String
   productDetails  String   // JSON
   rate            Float?
+  gst             Float?
   amount          Float?
+  status          String   @default("ORDER_PLACED")
+  productionStages String?
   createdAt       DateTime @default(now())
+
+  statusLogs      OrderItemStatusLog[]
+}
+
+model OrderItemStatusLog {
+  id           String      @id @default(cuid())
+  orderItemId  String
+  orderItem    OrderItem   @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  fromStatus   String
+  toStatus     String
+  notes        String?
+  changedById  String
+  changedBy    User        @relation("ItemChangedBy", fields: [changedById], references: [id])
+  changedAt    DateTime    @default(now())
 }
 
 model OrderComment {
@@ -144,4 +165,60 @@ model StockLog {
   userId       String
   user         User        @relation("UserStockChanges", fields: [userId], references: [id])
   createdAt    DateTime    @default(now())
+}
+
+model Lead {
+  id            String    @id @default(cuid())
+  companyName   String
+  remarks       String?
+  status        String    @default("NEW") // NEW, FOLLOW_UP, CONVERTED, CLOSED_LOST
+  closeReason   String?
+  nextFollowUp  DateTime?
+
+  // Visit proof fields
+  visitPhoto     String?  // file path of photo taken at the lead's location
+  visitLatitude  Float?   // GPS latitude captured at time of entry
+  visitLongitude Float?   // GPS longitude captured at time of entry
+
+  salesPersonId String
+  salesPerson   User      @relation("UserLeads", fields: [salesPersonId], references: [id])
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  contacts      LeadContact[]
+  items         LeadItem[]
+  followUps     LeadFollowUp[]
+}
+
+model LeadContact {
+  id          String   @id @default(cuid())
+  leadId      String
+  lead        Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  name        String
+  designation String?
+  phone       String?
+  email       String?
+  isPrimary   Boolean  @default(false)
+}
+
+model LeadItem {
+  id              String   @id @default(cuid())
+  leadId          String
+  lead            Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  productCategory String
+  productDetails  String   // JSON
+  rate            Float?
+  gst             Float?
+  amount          Float?
+}
+
+model LeadFollowUp {
+  id        String   @id @default(cuid())
+  leadId    String
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation("UserLeadFollowUps", fields: [userId], references: [id])
+  notes     String
+  createdAt DateTime @default(now())
 }

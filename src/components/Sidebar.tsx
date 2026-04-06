@@ -11,14 +11,22 @@ import {
   Settings,
   LogOut,
   BarChart3,
-  User,
   Calendar,
-  Warehouse,
   Users,
+  Target,
   Menu,
+  Columns3,
+  Truck,
+  ClipboardList,
+  Activity,
+  Languages,
+  Calculator,
   X as CloseIcon,
 } from "lucide-react";
+import GlobalSearch from "@/components/GlobalSearch";
 import { cn } from "@/lib/utils";
+import { useLanguage } from "@/contexts/LanguageContext";
+import type { TranslationKey } from "@/lib/translations";
 import type { UserRole } from "@/types";
 
 interface SidebarProps {
@@ -30,60 +38,25 @@ interface SidebarProps {
 
 interface NavItem {
   href: string;
-  label: string;
+  labelKey: TranslationKey;
   icon: React.ElementType;
   roles: UserRole[] | "all";
 }
 
 const NAV_ITEMS: NavItem[] = [
-  {
-    href: "/",
-    label: "Dashboard",
-    icon: LayoutDashboard,
-    roles: "all",
-  },
-  {
-    href: "/orders",
-    label: "Orders",
-    icon: Package,
-    roles: "all",
-  },
-  {
-    href: "/calendar",
-    label: "Calendar",
-    icon: Calendar,
-    roles: "all",
-  },
-  {
-    href: "/customers",
-    label: "Parties",
-    icon: Users,
-    roles: ["ADMIN", "SALES", "ACCOUNTANT"],
-  },
-  {
-    href: "/inventory",
-    label: "Inventory",
-    icon: Warehouse,
-    roles: ["ADMIN", "PRODUCTION"],
-  },
-  {
-    href: "/reports",
-    label: "Reports",
-    icon: BarChart3,
-    roles: "all",
-  },
-  {
-    href: "/orders/new",
-    label: "New Order",
-    icon: PlusCircle,
-    roles: ["ADMIN", "SALES"],
-  },
-  {
-    href: "/settings",
-    label: "Settings",
-    icon: Settings,
-    roles: ["ADMIN"],
-  },
+  { href: "/", labelKey: "nav.dashboard", icon: LayoutDashboard, roles: "all" },
+  { href: "/orders", labelKey: "nav.orders", icon: Package, roles: "all" },
+  { href: "/calendar", labelKey: "nav.calendar", icon: Calendar, roles: "all" },
+  { href: "/customers", labelKey: "nav.parties", icon: Users, roles: ["ADMIN", "SALES", "ACCOUNTANT"] },
+  { href: "/production-queue", labelKey: "nav.production", icon: Columns3, roles: ["ADMIN", "PRODUCTION", "DISPATCH"] },
+  { href: "/dispatched", labelKey: "nav.dispatched", icon: Truck, roles: ["ADMIN", "PRODUCTION", "DISPATCH"] },
+  { href: "/leads", labelKey: "nav.leads", icon: Target, roles: ["ADMIN", "SALES"] },
+  { href: "/production-report", labelKey: "nav.dailyReport", icon: ClipboardList, roles: ["ADMIN", "PRODUCTION"] },
+  { href: "/reports", labelKey: "nav.reports", icon: BarChart3, roles: ["ADMIN", "SALES", "ACCOUNTANT"] },
+  { href: "/activity-log", labelKey: "nav.activityLog", icon: Activity, roles: ["ADMIN"] },
+  { href: "/calculator", labelKey: "nav.calculator", icon: Calculator, roles: ["ADMIN"] },
+  { href: "/orders/new", labelKey: "nav.newOrder", icon: PlusCircle, roles: ["ADMIN", "SALES"] },
+  { href: "/settings", labelKey: "nav.settings", icon: Settings, roles: ["ADMIN"] },
 ];
 
 function getVisibleItems(role: UserRole): NavItem[] {
@@ -98,8 +71,8 @@ export default function Sidebar({ user }: SidebarProps) {
   const [showProfile, setShowProfile] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
+  const { t, lang, setLang } = useLanguage();
 
-  // Close profile dropdown when clicking outside
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
@@ -117,9 +90,11 @@ export default function Sidebar({ user }: SidebarProps) {
     .toUpperCase()
     .slice(0, 2);
 
+  const toggleLang = () => setLang(lang === "en" ? "hi" : "en");
+
   return (
     <>
-      {/* Mobile Top Bar with Profile */}
+      {/* Mobile Top Bar */}
       <div className="md:hidden fixed top-0 left-0 right-0 z-50 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <button
@@ -132,30 +107,40 @@ export default function Sidebar({ user }: SidebarProps) {
             <img src="/logo.png" alt="Ambiance Printing & Packaging" className="h-7 w-auto object-contain" />
           </Link>
         </div>
-        <div className="relative" ref={profileRef}>
+        <div className="flex items-center gap-2">
+          {/* Language toggle - mobile */}
           <button
-            onClick={() => setShowProfile(!showProfile)}
-            className="flex items-center justify-center w-8 h-8 rounded-full bg-brand-100 text-brand-700 text-xs font-semibold"
+            onClick={toggleLang}
+            className="flex items-center justify-center w-8 h-8 rounded-full bg-gray-100 text-gray-600 text-[10px] font-bold hover:bg-gray-200 transition-colors"
+            title={lang === "en" ? "हिंदी में बदलें" : "Switch to English"}
           >
-            {initials}
+            {lang === "en" ? "हि" : "EN"}
           </button>
-          {showProfile && (
-            <div className="absolute right-0 top-10 w-48 bg-white rounded-xl shadow-lg border border-gray-200 py-2 z-50">
-              <div className="px-4 py-2 border-b border-gray-100">
-                <p className="text-sm font-medium text-gray-900">{user.name}</p>
-                <p className="text-xs text-gray-500 capitalize">
-                  {user.role.toLowerCase().replace("_", " ")}
-                </p>
+          <div className="relative" ref={profileRef}>
+            <button
+              onClick={() => setShowProfile(!showProfile)}
+              className="flex items-center justify-center w-8 h-8 rounded-full bg-brand-100 text-brand-700 text-xs font-semibold"
+            >
+              {initials}
+            </button>
+            {showProfile && (
+              <div className="absolute right-0 top-10 w-48 bg-white rounded-xl shadow-lg border border-gray-200 py-2 z-50">
+                <div className="px-4 py-2 border-b border-gray-100">
+                  <p className="text-sm font-medium text-gray-900">{user.name}</p>
+                  <p className="text-xs text-gray-500 capitalize">
+                    {user.role.toLowerCase().replace("_", " ")}
+                  </p>
+                </div>
+                <button
+                  onClick={() => signOut({ callbackUrl: "/login" })}
+                  className="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                >
+                  <LogOut className="w-4 h-4" />
+                  {t("nav.logout")}
+                </button>
               </div>
-              <button
-                onClick={() => signOut({ callbackUrl: "/login" })}
-                className="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
-              >
-                <LogOut className="w-4 h-4" />
-                Logout
-              </button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
 
@@ -166,6 +151,11 @@ export default function Sidebar({ user }: SidebarProps) {
           <Link href="/" className="block hover:opacity-90 transition-opacity shrink-0">
             <img src="/logo.png" alt="Ambiance Printing & Packaging" className="h-10 w-auto object-contain" />
           </Link>
+        </div>
+
+        {/* Search */}
+        <div className="px-3 pt-3">
+          <GlobalSearch />
         </div>
 
         {/* Navigation */}
@@ -193,14 +183,26 @@ export default function Sidebar({ user }: SidebarProps) {
                     isActive ? "text-brand-500" : "text-gray-400"
                   )}
                 />
-                {item.label}
+                {t(item.labelKey)}
               </Link>
             );
           })}
         </nav>
 
-        {/* User Info & Logout */}
+        {/* Language Toggle + User Info */}
         <div className="border-t border-gray-100 px-4 py-4">
+          {/* Language Switch */}
+          <button
+            onClick={toggleLang}
+            className="flex items-center gap-2.5 w-full px-3 py-2 mb-3 text-sm text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
+          >
+            <Languages className="w-4 h-4 text-gray-400" />
+            <span>{lang === "en" ? "हिंदी में बदलें" : "Switch to English"}</span>
+            <span className="ml-auto text-[10px] font-bold bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">
+              {lang === "en" ? "EN" : "हि"}
+            </span>
+          </button>
+
           <div className="flex items-center gap-3 mb-3">
             <div className="flex items-center justify-center w-8 h-8 rounded-full bg-brand-100 text-brand-700 text-xs font-semibold">
               {initials}
@@ -219,13 +221,13 @@ export default function Sidebar({ user }: SidebarProps) {
             className="flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
           >
             <LogOut className="w-4 h-4" />
-            Logout
+            {t("nav.logout")}
           </button>
         </div>
       </aside>
 
       {/* Mobile Bottom Navigation */}
-      <nav 
+      <nav
         className="fixed bottom-0 left-0 right-0 z-50 md:hidden bg-white border-t border-gray-200 safe-area-bottom overflow-x-auto scrollbar-hide"
         style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
       >
@@ -247,7 +249,7 @@ export default function Sidebar({ user }: SidebarProps) {
                 )}
               >
                 <Icon className="w-5 h-5 mb-0.5" />
-                <span className="text-[10px] items-center font-medium leading-tight">{item.label}</span>
+                <span className="text-[10px] items-center font-medium leading-tight">{t(item.labelKey)}</span>
               </Link>
             );
           })}
@@ -257,15 +259,15 @@ export default function Sidebar({ user }: SidebarProps) {
       {/* Mobile Side Menu Overlay */}
       {showMobileMenu && (
         <div className="md:hidden fixed inset-0 z-[60] flex">
-          <div 
-            className="fixed inset-0 bg-gray-900/50 transition-opacity" 
-            onClick={() => setShowMobileMenu(false)} 
+          <div
+            className="fixed inset-0 bg-gray-900/50 transition-opacity"
+            onClick={() => setShowMobileMenu(false)}
           />
           <div className="relative w-64 max-w-[80vw] bg-white h-full shadow-xl flex flex-col">
             <div className="flex items-center justify-between px-4 py-4 border-b border-gray-100">
-              <span className="font-semibold text-gray-900">Menu</span>
-              <button 
-                onClick={() => setShowMobileMenu(false)} 
+              <span className="font-semibold text-gray-900">{t("nav.menu")}</span>
+              <button
+                onClick={() => setShowMobileMenu(false)}
                 className="p-1 text-gray-500"
               >
                 <CloseIcon className="w-5 h-5" />
@@ -296,11 +298,21 @@ export default function Sidebar({ user }: SidebarProps) {
                         isActive ? "text-brand-500" : "text-gray-400"
                       )}
                     />
-                    {item.label}
+                    {t(item.labelKey)}
                   </Link>
                 );
               })}
             </nav>
+            {/* Language toggle in mobile menu */}
+            <div className="border-t border-gray-100 p-3">
+              <button
+                onClick={toggleLang}
+                className="flex items-center gap-2.5 w-full px-3 py-2.5 text-sm text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
+              >
+                <Languages className="w-4 h-4 text-gray-400" />
+                <span>{lang === "en" ? "हिंदी में बदलें" : "Switch to English"}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -2,14 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import ProductForm from "@/components/ProductForm";
 import { PRODUCT_CATEGORIES } from "@/types";
 import type { UserRole, ProductCategory } from "@/types";
 import { hasPermission } from "@/lib/utils";
 import toast, { Toaster } from "react-hot-toast";
-import { ArrowLeft, Send, Plus, Trash2, ChevronDown, ChevronUp, IndianRupee } from "lucide-react";
+import { ArrowLeft, Send, Plus, Trash2, ChevronDown, ChevronUp, IndianRupee, ImagePlus, X } from "lucide-react";
 import Link from "next/link";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 interface Customer {
   id: string;
@@ -22,8 +23,10 @@ interface OrderItemData {
   productCategory: ProductCategory | "";
   productDetails: Record<string, string>;
   rate: string;
-  amount: string;
+  gst: string;
   expanded: boolean;
+  image: File | null;
+  imagePreview: string;
 }
 
 let itemCounter = 0;
@@ -33,25 +36,35 @@ function newItem(): OrderItemData {
     productCategory: "",
     productDetails: {},
     rate: "",
-    amount: "",
+    gst: "",
     expanded: true,
+    image: null,
+    imagePreview: "",
   };
 }
 
 export default function NewOrderPage() {
   const { data: session, status: sessionStatus } = useSession();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const partyParam = searchParams.get("partyName");
+  const leadId = searchParams.get("leadId");
+  const initialNewPartyState = !!partyParam && !leadId;
+  const { t, tProduct } = useLanguage();
 
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [customersLoaded, setCustomersLoaded] = useState(false);
   const [customerId, setCustomerId] = useState("");
-  const [newPartyName, setNewPartyName] = useState("");
+  const [newPartyName, setNewPartyName] = useState(partyParam || "");
   const [newPartyLocation, setNewPartyLocation] = useState("");
-  const [showNewParty, setShowNewParty] = useState(false);
+  const [showNewParty, setShowNewParty] = useState(initialNewPartyState);
   const [items, setItems] = useState<OrderItemData[]>([newItem()]);
   const [deliveryDeadline, setDeliveryDeadline] = useState("");
   const [remarks, setRemarks] = useState("");
   const [priority, setPriority] = useState<"NORMAL" | "URGENT">("NORMAL");
   const [submitting, setSubmitting] = useState(false);
+  const [leadLoaded, setLeadLoaded] = useState(false);
+  const [leadCompany, setLeadCompany] = useState("");
 
   const userRole = ((session?.user as any)?.role || "SALES") as UserRole;
   const canCreate = hasPermission(userRole, "create_order");
@@ -59,9 +72,84 @@ export default function NewOrderPage() {
   useEffect(() => {
     fetch("/api/customers")
       .then((res) => res.json())
-      .then((data) => setCustomers(Array.isArray(data) ? data : []))
-      .catch(() => {});
+      .then((data) => {
+        const list = Array.isArray(data) ? data : [];
+        setCustomers(list);
+        setCustomersLoaded(true);
+        // If leadId is present, auto-select matching customer by party name
+        if (partyParam && leadId) {
+          const match = list.find((c: Customer) => c.partyName.toLowerCase() === partyParam.toLowerCase());
+          if (match) setCustomerId(match.id);
+        }
+      })
+      .catch(() => { setCustomersLoaded(true); });
   }, []);
+
+  // Fetch lead data and pre-fill the form
+  useEffect(() => {
+    if (!leadId || leadLoaded || !customersLoaded) return;
+
+    fetch(`/api/leads/${leadId}`)
+      .then((res) => res.json())
+      .then(async (lead) => {
+        if (!lead || lead.error) return;
+
+        setLeadCompany(lead.companyName || "");
+
+        // Pre-fill remarks
+        if (lead.remarks) setRemarks(lead.remarks);
+
+        // Pre-fill items from lead
+        if (lead.items && lead.items.length > 0) {
+          const prefilled: OrderItemData[] = lead.items.map((li: any) => {
+            let details: Record<string, string> = {};
+            try {
+              details = typeof li.productDetails === "string" ? JSON.parse(li.productDetails) : li.productDetails || {};
+            } catch { /* ignore */ }
+
+            return {
+              id: `item-${++itemCounter}`,
+              productCategory: li.productCategory || "",
+              productDetails: details,
+              rate: li.rate ? String(li.rate) : "",
+              gst: "",
+              expanded: true,
+              image: null,
+              imagePreview: "",
+            };
+          });
+          setItems(prefilled);
+        }
+
+        // Auto-find or create customer from lead's company name
+        const companyName = lead.companyName || "";
+        if (companyName) {
+          const existing = customers.find(
+            (c) => c.partyName.toLowerCase() === companyName.toLowerCase()
+          );
+          if (existing) {
+            setCustomerId(existing.id);
+          } else {
+            // Auto-create the customer
+            try {
+              const res = await fetch("/api/customers", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ partyName: companyName.trim() }),
+              });
+              const newCustomer = await res.json();
+              if (res.ok) {
+                setCustomers((prev) => [...prev, newCustomer]);
+                setCustomerId(newCustomer.id);
+              }
+            } catch { /* ignore */ }
+          }
+        }
+
+        setLeadLoaded(true);
+      })
+      .catch(() => {});
+  }, [leadId, leadLoaded, customersLoaded]);
 
   useEffect(() => {
     if (sessionStatus === "authenticated" && !canCreate) {
@@ -113,10 +201,7 @@ export default function NewOrderPage() {
     }
   };
 
-  const orderTotal = items.reduce((sum, item) => {
-    const amt = parseFloat(item.amount) || 0;
-    return sum + amt;
-  }, 0);
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -146,7 +231,7 @@ export default function NewOrderPage() {
             productCategory: item.productCategory,
             productDetails: item.productDetails,
             rate: item.rate ? parseFloat(item.rate) : null,
-            amount: item.amount ? parseFloat(item.amount) : null,
+            gst: item.gst ? parseFloat(item.gst) : null,
           })),
           deliveryDeadline: deliveryDeadline || null,
           remarks: remarks || null,
@@ -157,13 +242,27 @@ export default function NewOrderPage() {
       const data = await res.json();
 
       if (res.ok) {
+        // Upload images as attachments
+        const orderId = data.id;
+        for (const item of items) {
+          if (item.image) {
+            const formData = new FormData();
+            formData.append("file", item.image);
+            try {
+              await fetch(`/api/orders/${orderId}/attachments`, {
+                method: "POST",
+                body: formData,
+              });
+            } catch { /* image upload failed silently */ }
+          }
+        }
         toast.success(`Order ${data.orderId} created successfully!`);
         setTimeout(() => router.push("/orders"), 500);
       } else {
-        toast.error(data.error || "Failed to create order");
+        toast.error((data.detail ? `${data.error}: ${data.detail}` : data.error) || "Failed to create order");
       }
-    } catch {
-      toast.error("Something went wrong");
+    } catch (err: any) {
+      toast.error(`Something went wrong: ${err?.message || String(err)}`);
     } finally {
       setSubmitting(false);
     }
@@ -185,14 +284,26 @@ export default function NewOrderPage() {
         >
           <ArrowLeft className="w-5 h-5 text-gray-600" />
         </Link>
-        <h1 className="text-xl font-bold text-gray-900">New Order</h1>
+        <h1 className="text-xl font-bold text-gray-900">{leadId ? t("newOrder.confirmCreate") : t("newOrder.title")}</h1>
       </div>
+
+      {/* Lead Conversion Banner */}
+      {leadId && (
+        <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 mb-2">
+          <p className="text-sm font-medium text-green-800">
+            📋 Converting lead: <span className="font-bold">{leadCompany || partyParam}</span>
+          </p>
+          <p className="text-xs text-green-600 mt-0.5">
+            Review the products below, make any changes to quantity or details, add more items if needed, then create the order.
+          </p>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Party Name */}
         <div className="bg-white rounded-xl border border-gray-200 p-4">
           <label className="block text-sm font-semibold text-gray-900 mb-3">
-            1. Party Name
+            {t("newOrder.partyName")}
           </label>
 
           {!showNewParty ? (
@@ -202,7 +313,7 @@ export default function NewOrderPage() {
                 onChange={(e) => setCustomerId(e.target.value)}
                 className="w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white"
               >
-                <option value="">Select party...</option>
+                <option value="">{t("newOrder.selectParty")}</option>
                 {customers.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.partyName}{c.location ? ` — ${c.location}` : ""}
@@ -214,7 +325,7 @@ export default function NewOrderPage() {
                 onClick={() => setShowNewParty(true)}
                 className="text-sm text-brand-600 hover:text-brand-700 font-medium"
               >
-                + Add new party
+                {t("newOrder.addNewParty")}
               </button>
             </div>
           ) : (
@@ -223,7 +334,7 @@ export default function NewOrderPage() {
                 type="text"
                 value={newPartyName}
                 onChange={(e) => setNewPartyName(e.target.value)}
-                placeholder="Enter party name..."
+                placeholder={t("newOrder.enterPartyName")}
                 className="w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
               />
               <div className="flex gap-2">
@@ -231,7 +342,7 @@ export default function NewOrderPage() {
                   type="text"
                   value={newPartyLocation}
                   onChange={(e) => setNewPartyLocation(e.target.value)}
-                  placeholder="Location (optional)..."
+                  placeholder={t("newOrder.locationOptional")}
                   className="flex-1 px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
                 />
                 <button
@@ -239,7 +350,7 @@ export default function NewOrderPage() {
                   onClick={handleCreateCustomer}
                   className="px-4 py-2.5 bg-brand-500 text-white text-sm rounded-lg hover:bg-brand-600 transition-colors"
                 >
-                  Add
+                  {t("newOrder.add")}
                 </button>
               </div>
               <button
@@ -247,7 +358,7 @@ export default function NewOrderPage() {
                 onClick={() => setShowNewParty(false)}
                 className="text-sm text-gray-500 hover:text-gray-700"
               >
-                Back to list
+                {t("newOrder.backToList")}
               </button>
             </div>
           )}
@@ -257,7 +368,7 @@ export default function NewOrderPage() {
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <label className="text-sm font-semibold text-gray-900">
-              2. Order Items ({items.length})
+              {t("newOrder.orderItems")} ({items.length})
             </label>
           </div>
 
@@ -274,14 +385,9 @@ export default function NewOrderPage() {
                   </span>
                   <span className="text-sm font-medium text-gray-700">
                     {item.productCategory
-                      ? PRODUCT_CATEGORIES.find((c) => c.value === item.productCategory)?.label
-                      : "Select product..."}
+                      ? tProduct(item.productCategory)
+                      : t("newOrder.selectProduct")}
                   </span>
-                  {item.amount && (
-                    <span className="text-xs text-gray-500 ml-2">
-                      Rs. {parseFloat(item.amount).toLocaleString("en-IN")}
-                    </span>
-                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   {items.length > 1 && (
@@ -310,7 +416,7 @@ export default function NewOrderPage() {
                   {/* Category selector */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Product Category
+                      {t("newOrder.productCategory")}
                     </label>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                       {PRODUCT_CATEGORIES.map((cat) => (
@@ -331,7 +437,7 @@ export default function NewOrderPage() {
                               : "border-gray-200 text-gray-600 hover:border-gray-300"
                           }`}
                         >
-                          {cat.label}
+                          {tProduct(cat.value)}
                         </button>
                       ))}
                     </div>
@@ -346,11 +452,11 @@ export default function NewOrderPage() {
                     />
                   )}
 
-                  {/* Rate & Amount */}
+                  {/* Rate & GST */}
                   <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-100">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                        Rate <span className="text-gray-400 font-normal">(optional)</span>
+                        {t("newOrder.rate")} <span className="text-gray-400 font-normal">{t("newOrder.optional")}</span>
                       </label>
                       <div className="relative">
                         <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -365,19 +471,62 @@ export default function NewOrderPage() {
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                        Amount <span className="text-gray-400 font-normal">(optional)</span>
+                        GST % <span className="text-gray-400 font-normal">{t("newOrder.optional")}</span>
                       </label>
                       <div className="relative">
-                        <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400 font-medium">%</span>
                         <input
                           type="number"
-                          value={item.amount}
-                          onChange={(e) => updateItem(item.id, { amount: e.target.value })}
-                          placeholder="0"
-                          className="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                          value={item.gst}
+                          onChange={(e) => updateItem(item.id, { gst: e.target.value })}
+                          placeholder="e.g. 18"
+                          min="0"
+                          max="100"
+                          className="w-full pl-8 pr-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
                         />
                       </div>
                     </div>
+                  </div>
+
+                  {/* Image Upload */}
+                  <div className="pt-2 border-t border-gray-100">
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                      {t("newOrder.designImage")} <span className="text-gray-400 font-normal">{t("newOrder.optional")}</span>
+                    </label>
+                    {item.imagePreview ? (
+                      <div className="relative inline-block">
+                        <img
+                          src={item.imagePreview}
+                          alt="Preview"
+                          className="w-32 h-32 object-cover rounded-lg border border-gray-200"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => updateItem(item.id, { image: null, imagePreview: "" })}
+                          className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 transition-colors shadow-sm"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="flex items-center justify-center gap-2 w-full py-3 border-2 border-dashed border-gray-300 rounded-lg text-sm text-gray-500 hover:border-brand-400 hover:text-brand-600 cursor-pointer transition-colors">
+                        <ImagePlus className="w-4 h-4" />
+                        {t("newOrder.uploadImage")}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              const reader = new FileReader();
+                              reader.onload = () => updateItem(item.id, { image: file, imagePreview: reader.result as string });
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                        />
+                      </label>
+                    )}
                   </div>
                 </div>
               )}
@@ -391,18 +540,10 @@ export default function NewOrderPage() {
             className="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed border-gray-300 rounded-xl text-sm font-medium text-gray-500 hover:border-brand-400 hover:text-brand-600 transition-colors"
           >
             <Plus className="w-4 h-4" />
-            Add Another Item
+            {t("newOrder.addAnother")}
           </button>
 
-          {/* Order Total */}
-          {orderTotal > 0 && (
-            <div className="flex items-center justify-between px-4 py-3 bg-brand-50 rounded-xl border border-brand-200">
-              <span className="text-sm font-semibold text-brand-800">Order Total</span>
-              <span className="text-lg font-bold text-brand-700">
-                Rs. {orderTotal.toLocaleString("en-IN")}
-              </span>
-            </div>
-          )}
+
         </div>
 
         {/* Priority & Delivery & Remarks */}

@@ -204,6 +204,14 @@ function BoppTapeForm({
         type="number"
         placeholder="e.g. 100"
       />
+      <InputField
+        label="Jumbo Code"
+        value={details.jumboCode || ""}
+        onChange={(v) => update("jumboCode", v)}
+        disabled={disabled}
+        placeholder="e.g. J-42-1280"
+        optional
+      />
     </div>
   );
 }

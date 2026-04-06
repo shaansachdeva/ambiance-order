@@ -4,10 +4,12 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import DashboardStats from "@/components/DashboardStats";
 import OrderCard from "@/components/OrderCard";
-import { getProductCategoryLabel, formatDate } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
 import { hasPermission } from "@/lib/utils";
+import { useLanguage } from "@/contexts/LanguageContext";
 import type { UserRole } from "@/types";
-import { AlertTriangle, TrendingUp } from "lucide-react";
+import { AlertTriangle, TrendingUp, Columns3, ArrowRight } from "lucide-react";
+import Link from "next/link";
 
 interface DashboardData {
   totalOrders: number;
@@ -23,6 +25,7 @@ interface DashboardData {
 
 export default function DashboardPage() {
   const { data: session } = useSession();
+  const { t, tProduct } = useLanguage();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -58,19 +61,32 @@ export default function DashboardPage() {
   }
 
   if (!data) {
-    return <div className="text-center text-gray-500 py-12">Failed to load dashboard.</div>;
+    return <div className="text-center text-gray-500 py-12">{t("dashboard.failedLoad")}</div>;
   }
 
   return (
     <div className="space-y-6">
       {/* Greeting */}
-      <div>
-        <h1 className="text-xl font-bold text-gray-900">
-          Welcome back, {session?.user?.name || "User"}
-        </h1>
-        <p className="text-sm text-gray-500 mt-0.5">
-          {formatDate(new Date())} — Here&apos;s your order overview
-        </p>
+      {/* Greeting & Quick Actions */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-bold text-gray-900">
+            {t("dashboard.welcome")} {session?.user?.name || "User"}
+          </h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            {formatDate(new Date())} — {t("dashboard.overview")}
+          </p>
+        </div>
+        {["ADMIN", "PRODUCTION", "DISPATCH"].includes(userRole) && (
+          <Link
+            href="/production-queue"
+            className="flex items-center gap-2 bg-brand-500 hover:bg-brand-600 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-sm w-max"
+          >
+            <Columns3 className="w-4 h-4" />
+            {t("dashboard.openProduction")}
+            <ArrowRight className="w-4 h-4 ml-2 opacity-70" />
+          </Link>
+        )}
       </div>
 
       {/* Stats */}
@@ -89,7 +105,7 @@ export default function DashboardPage() {
         <div>
           <h2 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
             <TrendingUp className="w-4 h-4 text-brand-500" />
-            Product-wise Orders
+            {t("dashboard.productWise")}
           </h2>
           <div className="flex flex-wrap gap-2">
             {data.productWiseCounts.map((item) => (
@@ -97,7 +113,7 @@ export default function DashboardPage() {
                 key={item.productCategory}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-200 rounded-full text-xs font-medium text-gray-700"
               >
-                {getProductCategoryLabel(item.productCategory)}
+                {tProduct(item.productCategory)}
                 <span className="bg-brand-100 text-brand-700 px-1.5 py-0.5 rounded-full text-xs font-bold">
                   {item.count}
                 </span>
@@ -112,7 +128,7 @@ export default function DashboardPage() {
         <div>
           <h2 className="text-sm font-semibold text-red-700 mb-3 flex items-center gap-2">
             <AlertTriangle className="w-4 h-4" />
-            Delayed Orders ({data.delayedOrders.length})
+            {t("dashboard.delayedOrders")} ({data.delayedOrders.length})
           </h2>
           <div className="space-y-2">
             {data.delayedOrders.map((order: any) => (
@@ -140,11 +156,11 @@ export default function DashboardPage() {
       {/* Recent Orders */}
       <div>
         <h2 className="text-sm font-semibold text-gray-900 mb-3">
-          Recent Orders
+          {t("dashboard.recentOrders")}
         </h2>
         {data.recentOrders.length === 0 ? (
           <div className="text-sm text-gray-500 text-center py-8 bg-white rounded-xl border border-gray-200">
-            No orders yet. Create your first order!
+            {t("dashboard.noOrders")}
           </div>
         ) : (
           <div className="space-y-2">

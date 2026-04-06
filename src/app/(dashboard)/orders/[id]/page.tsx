@@ -7,12 +7,14 @@ import StatusBadge from "@/components/StatusBadge";
 import OrderStatusTimeline from "@/components/OrderStatusTimeline";
 import ProductForm from "@/components/ProductForm";
 import {
-  getProductCategoryLabel,
-  getStatusLabel,
   formatDate,
   formatDateTime,
   hasPermission,
+  getProductCategoryLabel,
+  getStatusLabel,
 } from "@/lib/utils";
+import { useLanguage } from "@/contexts/LanguageContext";
+import type { TranslationKey } from "@/lib/translations";
 import { PRODUCT_CATEGORIES, PRODUCTION_STAGES } from "@/types";
 import type { UserRole, OrderStatus, ProductCategory } from "@/types";
 import toast, { Toaster } from "react-hot-toast";
@@ -37,20 +39,21 @@ import {
   AlertTriangle,
   IndianRupee,
   Zap,
+  Trash2,
 } from "lucide-react";
 import Link from "next/link";
 
 const STATUS_BUTTONS: {
   status: OrderStatus;
-  label: string;
+  labelKey: TranslationKey;
   color: string;
   roles: string[];
 }[] = [
-  { status: "CONFIRMED", label: "Confirm", color: "bg-purple-500 hover:bg-purple-600", roles: ["ADMIN", "PRODUCTION"] },
-  { status: "IN_PRODUCTION", label: "In Production", color: "bg-amber-500 hover:bg-amber-600", roles: ["ADMIN", "PRODUCTION"] },
-  { status: "RAW_MATERIAL_NA", label: "Raw Material N/A", color: "bg-red-500 hover:bg-red-600", roles: ["ADMIN", "PRODUCTION"] },
-  { status: "READY_FOR_DISPATCH", label: "Ready for Dispatch", color: "bg-green-500 hover:bg-green-600", roles: ["ADMIN", "PRODUCTION"] },
-  { status: "DISPATCHED", label: "Dispatched", color: "bg-gray-500 hover:bg-gray-600", roles: ["ADMIN", "DISPATCH"] },
+  { status: "CONFIRMED", labelKey: "orderDetail.confirm", color: "bg-purple-500 hover:bg-purple-600", roles: ["ADMIN", "PRODUCTION"] },
+  { status: "IN_PRODUCTION", labelKey: "orderDetail.inProduction", color: "bg-amber-500 hover:bg-amber-600", roles: ["ADMIN", "PRODUCTION"] },
+  { status: "RAW_MATERIAL_NA", labelKey: "orderDetail.rawMaterialNA", color: "bg-red-500 hover:bg-red-600", roles: ["ADMIN", "PRODUCTION"] },
+  { status: "READY_FOR_DISPATCH", labelKey: "orderDetail.readyForDispatch", color: "bg-green-500 hover:bg-green-600", roles: ["ADMIN", "PRODUCTION"] },
+  { status: "DISPATCHED", labelKey: "orderDetail.dispatched", color: "bg-gray-500 hover:bg-gray-600", roles: ["ADMIN", "DISPATCH"] },
 ];
 
 export default function OrderDetailPage() {
@@ -83,10 +86,25 @@ export default function OrderDetailPage() {
   // Attachments
   const [uploading, setUploading] = useState(false);
 
+  // Raw Material N/A modal (order-level)
+  const [showRawMaterialModal, setShowRawMaterialModal] = useState(false);
+  const [rawMaterialNote, setRawMaterialNote] = useState("");
+
+  // Raw Material N/A modal (item-level)
+  const [showItemRawMaterialModal, setShowItemRawMaterialModal] = useState<{ itemId: string } | null>(null);
+  const [itemRawMaterialNote, setItemRawMaterialNote] = useState("");
+
+  // Per-item jumbo codes (for BOPP_TAPE items)
+  const [itemJumboCodes, setItemJumboCodes] = useState<Record<string, string>>({});
+  // Per-item extra rolls (for BOPP_TAPE items — set by production supervisor)
+  const [itemExtraRolls, setItemExtraRolls] = useState<Record<string, string>>({});
+
+  const { t, tStatus, tProduct } = useLanguage();
+
   const userRole = ((session?.user as any)?.role || "SALES") as UserRole;
   const showParty = hasPermission(userRole, "view_party");
   const canUpdateStatus = hasPermission(userRole, "update_status");
-  const canEditOrder = userRole === "ADMIN" || userRole === "ACCOUNTANT";
+  const canEditOrder = userRole === "ADMIN" || userRole === "ACCOUNTANT" || userRole === "SALES";
   const canEditJumbo = userRole === "PRODUCTION" || userRole === "ADMIN";
   const canEditChallan = userRole === "DISPATCH" || userRole === "ACCOUNTANT" || userRole === "ADMIN";
   const canEditStages = userRole === "PRODUCTION" || userRole === "ADMIN";
@@ -104,6 +122,20 @@ export default function OrderDetailPage() {
         );
         setEditJumboCode(data.jumboCode || "");
         setEditChallan(data.challanNumber || "");
+        // Init per-item jumbo codes and extra rolls for BOPP_TAPE items
+        const codes: Record<string, string> = {};
+        const rolls: Record<string, string> = {};
+        for (const item of data.items || []) {
+          if (item.productCategory === "BOPP_TAPE") {
+            try {
+              const d = typeof item.productDetails === "string" ? JSON.parse(item.productDetails) : item.productDetails || {};
+              codes[item.id] = d.jumboCode || "";
+              rolls[item.id] = d.extraRolls || "";
+            } catch {}
+          }
+        }
+        setItemJumboCodes(codes);
+        setItemExtraRolls(rolls);
         setLoading(false);
       })
       .catch(() => setLoading(false));
@@ -113,25 +145,33 @@ export default function OrderDetailPage() {
     fetchOrder();
   }, [id]);
 
-  const handleStatusUpdate = async (newStatus: string) => {
+  const handleStatusUpdate = async (newStatus: string, notes?: string) => {
+    // Intercept RAW_MATERIAL_NA — show modal to ask what material is finished
+    if (newStatus === "RAW_MATERIAL_NA" && !notes && !showRawMaterialModal) {
+      setShowRawMaterialModal(true);
+      return;
+    }
+
     setUpdatingStatus(newStatus);
     try {
       const res = await fetch(`/api/orders/${id}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus, notes: statusNotes || null }),
+        body: JSON.stringify({ status: newStatus, notes: notes || statusNotes || null }),
       });
 
       if (res.ok) {
-        toast.success(`Status updated to ${getStatusLabel(newStatus)}`);
+        toast.success(`${t("orderDetail.statusUpdated")} ${tStatus(newStatus)}`);
         setStatusNotes("");
+        setShowRawMaterialModal(false);
+        setRawMaterialNote("");
         fetchOrder();
       } else {
         const data = await res.json();
-        toast.error(data.error || "Failed to update status");
+        toast.error(data.error || t("common.failedToUpdate"));
       }
     } catch {
-      toast.error("Something went wrong");
+      toast.error(t("common.error"));
     } finally {
       setUpdatingStatus(null);
     }
@@ -153,17 +193,56 @@ export default function OrderDetailPage() {
       });
 
       if (res.ok) {
-        toast.success("Saved");
+        toast.success(t("orderDetail.saved"));
         fetchOrder();
       } else {
         const data = await res.json();
-        toast.error(data.error || "Failed to save");
+        toast.error(data.error || t("orderDetail.failedToSave"));
       }
     } catch {
-      toast.error("Something went wrong");
+      toast.error(t("common.error"));
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleDeleteOrder = () => {
+    toast(
+      (toastInstance) => (
+        <div className="flex flex-col gap-2">
+          <p className="text-sm font-medium text-gray-900">{t("orderDetail.deleteConfirm")}</p>
+          <p className="text-xs text-gray-500">This cannot be undone.</p>
+          <div className="flex gap-2 justify-end">
+            <button
+              onClick={() => toast.dismiss(toastInstance.id)}
+              className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={async () => {
+                toast.dismiss(toastInstance.id);
+                try {
+                  const res = await fetch(`/api/orders/${id}`, { method: "DELETE" });
+                  if (res.ok) {
+                    toast.success(t("orderDetail.deleted"));
+                    router.push("/orders");
+                  } else {
+                    toast.error(t("orderDetail.failedToDelete"));
+                  }
+                } catch {
+                  toast.error(t("orderDetail.errorDeleting"));
+                }
+              }}
+              className="px-3 py-1.5 text-xs font-medium text-white bg-red-500 rounded-lg hover:bg-red-600"
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      ),
+      { duration: Infinity }
+    );
   };
 
   const startEditing = () => {
@@ -202,24 +281,105 @@ export default function OrderDetailPage() {
     }
   };
 
-  const handleStageToggle = async (stage: string) => {
-    const currentStages = order.productionStages
-      ? JSON.parse(order.productionStages)
+  const handleItemStageToggle = async (itemId: string, currentStagesRaw: string | null, stage: string) => {
+    const currentStages = currentStagesRaw
+      ? JSON.parse(currentStagesRaw)
       : { printing: false, coating: false, slitting: false };
     const updated = { ...currentStages, [stage]: !currentStages[stage] };
 
     try {
-      const res = await fetch(`/api/orders/${id}`, {
+      const res = await fetch(`/api/order-items/${itemId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ productionStages: JSON.stringify(updated) }),
       });
       if (res.ok) {
-        toast.success(`${stage.charAt(0).toUpperCase() + stage.slice(1)} ${updated[stage] ? "completed" : "unchecked"}`);
+        toast.success(`${stage.charAt(0).toUpperCase() + stage.slice(1)} updated`);
         fetchOrder();
       }
     } catch {
       toast.error("Failed to update stage");
+    }
+  };
+
+  const handleItemStatusUpdate = async (itemId: string, newStatus: string, notes?: string) => {
+    // Intercept RAW_MATERIAL_NA to ask for details
+    if (newStatus === "RAW_MATERIAL_NA" && notes === undefined) {
+      setItemRawMaterialNote("");
+      setShowItemRawMaterialModal({ itemId });
+      return;
+    }
+
+    setUpdatingStatus(itemId + newStatus);
+    try {
+      const res = await fetch(`/api/order-items/${itemId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: newStatus,
+          notes: notes || null,
+        }),
+      });
+
+      if (res.ok) {
+        toast.success(t("orderDetail.statusUpdated"));
+        setShowItemRawMaterialModal(null);
+        setItemRawMaterialNote("");
+        fetchOrder();
+      } else {
+        const data = await res.json();
+        toast.error(data.error || t("common.failedToUpdate"));
+      }
+    } catch {
+      toast.error(t("common.error"));
+    } finally {
+      setUpdatingStatus(null);
+    }
+  };
+
+  const handleItemJumboSave = async (itemId: string) => {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/order-items/${itemId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          productDetails: { jumboCode: itemJumboCodes[itemId] || "" },
+        }),
+      });
+      if (res.ok) {
+        toast.success(t("orderDetail.saved"));
+        fetchOrder();
+      } else {
+        toast.error(t("orderDetail.failedToSave"));
+      }
+    } catch {
+      toast.error(t("common.error"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleItemExtraRollsSave = async (itemId: string) => {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/order-items/${itemId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          productDetails: { extraRolls: itemExtraRolls[itemId] || "" },
+        }),
+      });
+      if (res.ok) {
+        toast.success(t("orderDetail.saved"));
+        fetchOrder();
+      } else {
+        toast.error(t("orderDetail.failedToSave"));
+      }
+    } catch {
+      toast.error(t("common.error"));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -273,35 +433,6 @@ export default function OrderDetailPage() {
     }
   };
 
-  // WhatsApp share
-  const shareWhatsApp = () => {
-    if (!order) return;
-    const formattedId =
-      typeof order.orderId === "number"
-        ? `ORD-${String(order.orderId).padStart(4, "0")}`
-        : order.orderId;
-
-    const itemsText = (order.items || []).length > 0
-      ? order.items.map((item: any, i: number) => {
-          const details = typeof item.productDetails === "string" ? JSON.parse(item.productDetails) : item.productDetails;
-          return `Item ${i + 1}: ${getProductCategoryLabel(item.productCategory)}${details.type ? ` (${details.type})` : ""}`;
-        }).join("\n")
-      : getProductCategoryLabel(order.productCategory);
-
-    const text = [
-      `*Order ${formattedId}*`,
-      `Status: ${getStatusLabel(order.status)}`,
-      order.customer ? `Party: ${order.customer.partyName}` : "",
-      `\n${itemsText}`,
-      order.deliveryDeadline ? `Deadline: ${formatDate(order.deliveryDeadline)}` : "",
-      order.challanNumber ? `Challan: ${order.challanNumber}` : "",
-      order.remarks ? `Remarks: ${order.remarks}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n");
-
-    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
-  };
 
   if (loading) {
     return (
@@ -316,9 +447,9 @@ export default function OrderDetailPage() {
   if (!order || order.error) {
     return (
       <div className="text-center py-12">
-        <p className="text-gray-500">Order not found.</p>
+        <p className="text-gray-500">{t("orderDetail.notFound")}</p>
         <Link href="/orders" className="text-brand-500 text-sm mt-2 inline-block">
-          Back to Orders
+          {t("orderDetail.backToOrders")}
         </Link>
       </div>
     );
@@ -355,7 +486,7 @@ export default function OrderDetailPage() {
     order.status !== "DISPATCHED";
 
   const orderItems = order.items || [];
-  const orderTotal = orderItems.reduce((s: number, i: any) => s + (i.amount || 0), 0);
+  const hasRawMaterialBlock = orderItems.some((item: any) => item.status === "RAW_MATERIAL_NA");
 
   return (
     <div className="max-w-2xl mx-auto space-y-4">
@@ -375,37 +506,52 @@ export default function OrderDetailPage() {
             {order.priority === "URGENT" && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-red-100 text-red-700 text-xs font-bold rounded-full">
                 <Zap className="w-3 h-3" />
-                URGENT
+                {t("orderCard.urgent")}
               </span>
             )}
           </div>
           <p className="text-xs text-gray-500">
             {orderItems.length > 1
-              ? `${orderItems.length} items`
-              : getProductCategoryLabel(order.productCategory)}
+              ? `${orderItems.length} ${t("orderDetail.items")}`
+              : tProduct(order.productCategory)}
           </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <StatusBadge status={order.status} />
         </div>
       </div>
 
       {/* Action buttons */}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <Link
           href={`/orders/${id}/challan`}
           className="flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-200 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
         >
           <Printer className="w-3.5 h-3.5" />
-          Print Challan
+          {t("orderDetail.printChallan")}
         </Link>
-        <button
-          onClick={shareWhatsApp}
+        <Link
+          href={`/orders/${id}/share`}
           className="flex items-center gap-1.5 px-3 py-2 bg-green-50 border border-green-200 rounded-lg text-xs font-medium text-green-700 hover:bg-green-100 transition-colors"
         >
           <Share2 className="w-3.5 h-3.5" />
-          WhatsApp
-        </button>
+          Share PDF
+        </Link>
+        {canEditOrder && (
+          <Link
+            href={`/orders/${id}/edit`}
+            className="flex items-center gap-1.5 px-3 py-2 bg-brand-50 border border-brand-200 rounded-lg text-xs font-medium text-brand-700 hover:bg-brand-100 transition-colors"
+          >
+            <Pencil className="w-3.5 h-3.5" />
+            {t("orderDetail.editOrder")}
+          </Link>
+        )}
+        {userRole === "ADMIN" && (
+          <button
+            onClick={handleDeleteOrder}
+            className="flex items-center gap-1.5 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs font-medium text-red-700 hover:bg-red-100 transition-colors"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            {t("orderDetail.deleteOrder")}
+          </button>
+        )}
       </div>
 
       {/* Overdue Alert */}
@@ -413,12 +559,23 @@ export default function OrderDetailPage() {
         <div className="flex items-center gap-2 px-4 py-3 bg-red-50 border border-red-200 rounded-xl">
           <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0" />
           <div>
-            <p className="text-sm font-semibold text-red-700">Overdue</p>
+            <p className="text-sm font-semibold text-red-700">{t("orderDetail.overdue")}</p>
             <p className="text-xs text-red-600">
-              Deadline was {formatDate(order.deliveryDeadline)} — {
+              {t("orderDetail.deadline")} {formatDate(order.deliveryDeadline)} — {
                 Math.ceil((new Date().getTime() - new Date(order.deliveryDeadline).getTime()) / (1000 * 60 * 60 * 24))
-              } days ago
+              } {t("orderDetail.days")} {t("orderDetail.ago")}
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* Raw Material Block Warning */}
+      {hasRawMaterialBlock && (
+        <div className="flex items-center gap-2 px-4 py-3 bg-orange-50 border border-orange-200 rounded-xl">
+          <AlertTriangle className="w-5 h-5 text-orange-500 flex-shrink-0" />
+          <div>
+            <p className="text-sm font-semibold text-orange-700">{t("orderDetail.rawMaterialIssue")}</p>
+            <p className="text-xs text-orange-600">{t("orderDetail.rawMaterialBlockDesc")}</p>
           </div>
         </div>
       )}
@@ -427,7 +584,7 @@ export default function OrderDetailPage() {
       <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
         {showParty && order.customer && (
           <div className="flex items-center gap-2 text-sm">
-            <span className="text-gray-500">Party:</span>
+            <span className="text-gray-500">{t("orderDetail.party")}</span>
             <Link
               href={`/customers/${order.customer.id}`}
               className="font-medium text-brand-600 hover:text-brand-700"
@@ -442,7 +599,7 @@ export default function OrderDetailPage() {
         {order.deliveryDeadline && (
           <div className="flex items-center gap-2 text-sm">
             <Calendar className="w-4 h-4 text-gray-400" />
-            <span className="text-gray-500">Deadline:</span>
+            <span className="text-gray-500">{t("orderDetail.deadline")}</span>
             <span className={`font-medium ${isOverdue ? "text-red-600" : "text-gray-900"}`}>
               {formatDate(order.deliveryDeadline)}
             </span>
@@ -455,287 +612,192 @@ export default function OrderDetailPage() {
         )}
         {order.createdBy && (
           <div className="flex items-center gap-2 text-sm">
-            <span className="text-gray-500">Created by:</span>
+            <span className="text-gray-500">{t("orderDetail.createdBy")}</span>
             <span className="text-gray-700">{order.createdBy.name}</span>
-            <span className="text-gray-400">on {formatDate(order.createdAt)}</span>
+            <span className="text-gray-400">{t("orderDetail.on")} {formatDate(order.createdAt)}</span>
           </div>
         )}
         {order.remarks && (
           <div className="flex items-start gap-2 text-sm">
             <FileText className="w-4 h-4 text-gray-400 mt-0.5" />
             <div>
-              <span className="text-gray-500">Remarks:</span>{" "}
+              <span className="text-gray-500">{t("orderDetail.remarks")}:</span>{" "}
               <span className="text-gray-700">{order.remarks}</span>
             </div>
           </div>
         )}
-        {order.jumboCode && (
+        {order.jumboCode && !orderItems.some((item: any) => item.productCategory === "BOPP_TAPE") && (
           <div className="flex items-center gap-2 text-sm">
             <Hash className="w-4 h-4 text-gray-400" />
-            <span className="text-gray-500">Jumbo Code:</span>
+            <span className="text-gray-500">{t("orderDetail.jumboCode")}:</span>
             <span className="font-medium text-gray-900">{order.jumboCode}</span>
           </div>
         )}
         {order.challanNumber && (
           <div className="flex items-center gap-2 text-sm">
             <Truck className="w-4 h-4 text-gray-400" />
-            <span className="text-gray-500">Challan No:</span>
+            <span className="text-gray-500">{t("challan.challanNo")}</span>
             <span className="font-medium text-gray-900">{order.challanNumber}</span>
-          </div>
-        )}
-        {orderTotal > 0 && (
-          <div className="flex items-center gap-2 text-sm">
-            <IndianRupee className="w-4 h-4 text-gray-400" />
-            <span className="text-gray-500">Total Amount:</span>
-            <span className="font-bold text-brand-600">Rs. {orderTotal.toLocaleString("en-IN")}</span>
           </div>
         )}
       </div>
 
-      {/* Production Stages */}
-      {showStages && (
-        <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <h2 className="text-sm font-semibold text-gray-900 mb-3">Production Stages</h2>
-          <div className="flex items-center gap-0">
-            {PRODUCTION_STAGES.map((stage, idx) => {
-              const key = stage.key;
-              const done = stages[key];
-              return (
-                <div key={key} className="flex items-center">
-                  <button
-                    onClick={() => canEditStages && handleStageToggle(key)}
-                    disabled={!canEditStages}
-                    className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                      done
-                        ? "bg-green-50 text-green-700"
-                        : "bg-gray-50 text-gray-400"
-                    } ${canEditStages ? "cursor-pointer hover:opacity-80" : "cursor-default"}`}
-                  >
-                    {done ? (
-                      <CheckCircle2 className="w-5 h-5 text-green-500" />
-                    ) : (
-                      <Circle className="w-5 h-5" />
-                    )}
-                    {stage.label}
-                  </button>
-                  {idx < PRODUCTION_STAGES.length - 1 && (
-                    <div className={`w-6 h-0.5 mx-1 ${done ? "bg-green-400" : "bg-gray-200"}`} />
+      {/* Order Items (multi-item) */}
+      <div className="bg-white rounded-xl border border-gray-200 p-4">
+        <h2 className="text-sm font-semibold text-gray-900 mb-3">
+          {t("orderDetail.orderItems")} ({orderItems.length})
+        </h2>
+        <div className="space-y-4">
+          {orderItems.map((item: any, idx: number) => {
+            const itemDetails = typeof item.productDetails === "string"
+              ? JSON.parse(item.productDetails)
+              : item.productDetails || {};
+            
+            const itemStages = item.productionStages
+              ? JSON.parse(item.productionStages)
+              : { printing: false, coating: false, slitting: false };
+
+            const isPrintedBopp =
+              item.productCategory === "BOPP_TAPE" &&
+              (itemDetails.type?.toLowerCase() === "printed" || itemDetails.printName?.trim().length > 0);
+
+            const showStages = isPrintedBopp;
+            
+            return (
+              <div key={item.id} className="bg-gray-50 rounded-xl border border-gray-200 overflow-hidden">
+                {/* Header */}
+                <div className="px-4 py-3 bg-white border-b border-gray-100 flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-6 h-6 rounded-full bg-brand-100 text-brand-700 text-xs font-bold flex items-center justify-center">
+                      {idx + 1}
+                    </span>
+                    <span className="text-sm font-semibold text-gray-900">
+                      {getProductCategoryLabel(item.productCategory)}
+                    </span>
+                  </div>
+                  <StatusBadge status={item.status || "ORDER_PLACED"} />
+                </div>
+
+                {/* Raw Material N/A note */}
+                {item.status === "RAW_MATERIAL_NA" && (() => {
+                  const rawLog = (item.statusLogs || []).find(
+                    (l: any) => l.toStatus === "RAW_MATERIAL_NA" && l.notes
+                  );
+                  return rawLog ? (
+                    <div className="px-4 py-2 bg-red-50 border-b border-red-100 flex items-start gap-2">
+                      <AlertTriangle className="w-3.5 h-3.5 text-red-500 mt-0.5 shrink-0" />
+                      <div>
+                        <span className="text-xs font-semibold text-red-700">Material Issue: </span>
+                        <span className="text-xs text-red-600">{rawLog.notes}</span>
+                        <span className="text-xs text-red-400 ml-2">— {rawLog.changedBy?.name}</span>
+                      </div>
+                    </div>
+                  ) : null;
+                })()}
+
+                {/* Details grid */}
+                <div className="p-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+                  {Object.entries(itemDetails).map(([key, value]) => {
+                    if (!value) return null;
+                    const label = key
+                      .replace(/([A-Z])/g, " $1")
+                      .replace(/^./, (s) => s.toUpperCase());
+                    return (
+                      <div key={key} className="text-xs">
+                        <span className="text-gray-500 block mb-0.5">{label}</span>
+                        <span className="text-gray-900 font-medium">{String(value)}</span>
+                      </div>
+                    );
+                  })}
+                  {item.rate && (
+                    <div className="text-xs">
+                      <span className="text-gray-500 block mb-0.5">{t("challan.rate")}</span>
+                      <span className="text-gray-900 font-medium">₹{item.rate}</span>
+                    </div>
                   )}
                 </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
-      {/* Order Items (multi-item) */}
-      {orderItems.length > 1 && (
-        <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <h2 className="text-sm font-semibold text-gray-900 mb-3">
-            Order Items ({orderItems.length})
-          </h2>
-          <div className="space-y-3">
-            {orderItems.map((item: any, idx: number) => {
-              const itemDetails =
-                typeof item.productDetails === "string"
-                  ? JSON.parse(item.productDetails)
-                  : item.productDetails;
-              return (
-                <div key={item.id} className="bg-gray-50 rounded-lg p-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="w-6 h-6 rounded-full bg-brand-100 text-brand-700 text-xs font-bold flex items-center justify-center">
-                        {idx + 1}
-                      </span>
-                      <span className="text-sm font-medium text-gray-900">
-                        {getProductCategoryLabel(item.productCategory)}
-                      </span>
+                {/* Production Stages */}
+                {showStages && (
+                  <div className="px-4 py-3 border-t border-gray-100 bg-white">
+                    <p className="text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">{t("orderDetail.productionStages")}</p>
+                    <div className="flex items-center gap-0 overflow-x-auto pb-1">
+                      {PRODUCTION_STAGES.map((stage, sIdx) => {
+                        const done = itemStages[stage.key];
+                        return (
+                          <div key={stage.key} className="flex items-center">
+                            <button
+                              onClick={() => canEditStages && handleItemStageToggle(item.id, item.productionStages, stage.key)}
+                              disabled={!canEditStages}
+                              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
+                                done
+                                  ? "bg-green-50 text-green-700"
+                                  : "bg-gray-50 text-gray-400"
+                              } ${canEditStages ? "cursor-pointer hover:opacity-80" : "cursor-default"}`}
+                            >
+                              {done ? (
+                                <CheckCircle2 className="w-4 h-4 text-green-500" />
+                              ) : (
+                                <Circle className="w-4 h-4" />
+                              )}
+                              {stage.label}
+                            </button>
+                            {sIdx < PRODUCTION_STAGES.length - 1 && (
+                              <div className={`w-4 h-0.5 mx-0.5 ${done ? "bg-green-400" : "bg-gray-200"}`} />
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
-                    {item.amount > 0 && (
-                      <span className="text-sm font-bold text-brand-600">
-                        Rs. {item.amount.toLocaleString("en-IN")}
-                      </span>
-                    )}
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {Object.entries(itemDetails).map(([key, value]) => {
-                      if (!value) return null;
-                      const label = key
-                        .replace(/([A-Z])/g, " $1")
-                        .replace(/^./, (s) => s.toUpperCase());
-                      return (
-                        <div key={key} className="text-xs">
-                          <span className="text-gray-500">{label}:</span>{" "}
-                          <span className="text-gray-700 font-medium">{String(value)}</span>
-                        </div>
-                      );
-                    })}
-                    {item.rate > 0 && (
-                      <div className="text-xs">
-                        <span className="text-gray-500">Rate:</span>{" "}
-                        <span className="text-gray-700 font-medium">Rs. {item.rate}</span>
-                      </div>
-                    )}
+                )}
+
+                {/* Status Update Buttons */}
+                {canUpdateStatus && item.status !== "DISPATCHED" && (
+                  <div className="px-4 py-3 bg-gray-50/50 border-t border-gray-100">
+                    <p className="text-xs font-medium text-gray-500 mb-2">{t("orderDetail.updateStatus")}</p>
+                    <div className="flex flex-wrap gap-2">
+                      {STATUS_BUTTONS.filter(
+                        (btn) => btn.roles.includes(userRole) && btn.status !== item.status
+                      ).map((btn) => {
+                        const isBlocked =
+                          hasRawMaterialBlock &&
+                          item.status !== "RAW_MATERIAL_NA" &&
+                          (btn.status === "READY_FOR_DISPATCH" || btn.status === "DISPATCHED");
+                        return (
+                          <button
+                            key={btn.status}
+                            onClick={() => !isBlocked && handleItemStatusUpdate(item.id, btn.status)}
+                            disabled={updatingStatus !== null || isBlocked}
+                            title={isBlocked ? t("orderDetail.resolveRawMaterial") : undefined}
+                            className={`px-3 py-1.5 text-white text-xs font-medium rounded-lg transition-all disabled:opacity-40 active:scale-95 ${btn.color}`}
+                          >
+                            {updatingStatus === (item.id + btn.status) ? "..." : t(btn.labelKey)}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+                )}
 
-      {/* Product Details (single item / legacy) */}
-      {orderItems.length <= 1 && (
-        <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold text-gray-900">Product Details</h2>
-            {canEditOrder && !isEditing && (
-              <button
-                onClick={startEditing}
-                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-brand-600 bg-brand-50 rounded-lg hover:bg-brand-100 transition-colors"
-              >
-                <Pencil className="w-3.5 h-3.5" />
-                Edit
-              </button>
-            )}
-          </div>
-
-          {isEditing ? (
-            <div className="space-y-4">
-              <div className="flex flex-wrap gap-2">
-                {PRODUCT_CATEGORIES.map((cat) => (
-                  <button
-                    key={cat.value}
-                    type="button"
-                    onClick={() => {
-                      if (cat.value !== editCategory) {
-                        setEditCategory(cat.value);
-                        setEditProductDetails({});
-                      }
-                    }}
-                    className={`px-2.5 py-1.5 text-xs rounded-lg border-2 font-medium transition-all ${
-                      editCategory === cat.value
-                        ? "border-brand-500 bg-brand-50 text-brand-700"
-                        : "border-gray-200 text-gray-500"
-                    }`}
-                  >
-                    {cat.label}
-                  </button>
-                ))}
               </div>
-
-              {editCategory && (
-                <ProductForm
-                  productCategory={editCategory}
-                  productDetails={editProductDetails}
-                  onChange={setEditProductDetails}
-                />
-              )}
-
-              <div className="flex gap-2">
-                <button
-                  onClick={handleSaveProductDetails}
-                  disabled={saving}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-brand-500 text-white text-sm font-medium rounded-lg hover:bg-brand-600 disabled:opacity-50"
-                >
-                  <Save className="w-4 h-4" />
-                  {saving ? "Saving..." : "Save Changes"}
-                </button>
-                <button
-                  onClick={() => setIsEditing(false)}
-                  className="flex items-center gap-1.5 px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50"
-                >
-                  <X className="w-4 h-4" />
-                  Cancel
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 gap-3">
-              {Object.entries(orderItems.length === 1
-                ? (typeof orderItems[0].productDetails === "string" ? JSON.parse(orderItems[0].productDetails) : orderItems[0].productDetails)
-                : details
-              ).map(([key, value]) => {
-                if (!value) return null;
-                const label = key
-                  .replace(/([A-Z])/g, " $1")
-                  .replace(/^./, (s) => s.toUpperCase())
-                  .replace("Size Mm", "Size (mm)")
-                  .replace("Size Inches", "Size (inches)")
-                  .replace("Meter Per Roll", "Meter/Roll")
-                  .replace("Sticker Per Roll", "Sticker/Roll");
-
-                return (
-                  <div key={key} className="bg-gray-50 rounded-lg px-3 py-2">
-                    <p className="text-xs text-gray-500">{label}</p>
-                    <p className="text-sm font-medium text-gray-900">{String(value)}</p>
-                  </div>
-                );
-              })}
-              {/* Show rate/amount for single item */}
-              {orderItems.length === 1 && orderItems[0].rate > 0 && (
-                <div className="bg-gray-50 rounded-lg px-3 py-2">
-                  <p className="text-xs text-gray-500">Rate</p>
-                  <p className="text-sm font-medium text-gray-900">Rs. {orderItems[0].rate}</p>
-                </div>
-              )}
-              {orderItems.length === 1 && orderItems[0].amount > 0 && (
-                <div className="bg-brand-50 rounded-lg px-3 py-2">
-                  <p className="text-xs text-brand-600">Amount</p>
-                  <p className="text-sm font-bold text-brand-700">Rs. {orderItems[0].amount.toLocaleString("en-IN")}</p>
-                </div>
-              )}
-            </div>
-          )}
+            );
+          })}
         </div>
-      )}
-
-      {/* Status Update */}
-      {canUpdateStatus && order.status !== "DISPATCHED" && (
-        <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <h2 className="text-sm font-semibold text-gray-900 mb-3">
-            Update Status
-          </h2>
-          <div className="space-y-3">
-            <input
-              type="text"
-              value={statusNotes}
-              onChange={(e) => setStatusNotes(e.target.value)}
-              placeholder="Add a note (optional)..."
-              className="w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-            />
-            <div className="flex flex-wrap gap-2">
-              {STATUS_BUTTONS.filter(
-                (btn) =>
-                  btn.roles.includes(userRole) &&
-                  btn.status !== order.status
-              ).map((btn) => (
-                <button
-                  key={btn.status}
-                  onClick={() => handleStatusUpdate(btn.status)}
-                  disabled={updatingStatus !== null}
-                  className={`px-3 py-2 text-white text-xs font-medium rounded-lg transition-colors disabled:opacity-50 ${btn.color}`}
-                >
-                  {updatingStatus === btn.status ? "Updating..." : btn.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
+      </div>
 
       {/* Editable Fields */}
       {(canEditOrder || canEditJumbo || canEditChallan) && (
         <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-4">
           <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
             <Wrench className="w-4 h-4" />
-            Edit Details
+            {t("orderDetail.editDetails")}
           </h2>
 
           {canEditOrder && (
             <>
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Remarks</label>
+                <label className="block text-xs font-medium text-gray-600 mb-1">{t("orderDetail.remarks")}</label>
                 <div className="flex gap-2">
                   <textarea
                     value={editRemarks}
@@ -754,7 +816,7 @@ export default function OrderDetailPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Delivery Deadline</label>
+                <label className="block text-xs font-medium text-gray-600 mb-1">{t("orderDetail.deliveryDeadline")}</label>
                 <div className="flex gap-2">
                   <input
                     type="date"
@@ -774,31 +836,101 @@ export default function OrderDetailPage() {
             </>
           )}
 
-          {canEditJumbo && (
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Jumbo Code</label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={editJumboCode}
-                  onChange={(e) => setEditJumboCode(e.target.value)}
-                  placeholder="Enter jumbo code..."
-                  className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                />
-                <button
-                  onClick={() => handleSaveField("jumboCode", editJumboCode)}
-                  disabled={saving}
-                  className="px-3 py-2 bg-brand-500 text-white text-xs rounded-lg hover:bg-brand-600 disabled:opacity-50"
-                >
-                  <Save className="w-3.5 h-3.5" />
-                </button>
+          {canEditJumbo && (() => {
+            const boppItems = orderItems.filter((item: any) => item.productCategory === "BOPP_TAPE");
+            if (boppItems.length > 0) {
+              // Per-item jumbo codes for BOPP_TAPE
+              return (
+                <div className="space-y-3">
+                  <p className="text-xs font-medium text-gray-600">{t("orderDetail.jumboCode")} ({t("orderDetail.items")})</p>
+                  {boppItems.map((item: any, idx: number) => (
+                    <div key={item.id}>
+                      <label className="block text-xs text-gray-500 mb-1">
+                        {t("orderDetail.items")} {orderItems.indexOf(item) + 1} — {getProductCategoryLabel(item.productCategory)}
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={itemJumboCodes[item.id] ?? ""}
+                          onChange={(e) => setItemJumboCodes((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                          placeholder="Enter jumbo code..."
+                          className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                        />
+                        <button
+                          onClick={() => handleItemJumboSave(item.id)}
+                          disabled={saving}
+                          className="px-3 py-2 bg-brand-500 text-white text-xs rounded-lg hover:bg-brand-600 disabled:opacity-50"
+                        >
+                          <Save className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            }
+            // Order-wide jumbo code for non-BOPP orders
+            return (
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">{t("orderDetail.jumboCode")}</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={editJumboCode}
+                    onChange={(e) => setEditJumboCode(e.target.value)}
+                    placeholder="Enter jumbo code..."
+                    className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                  <button
+                    onClick={() => handleSaveField("jumboCode", editJumboCode)}
+                    disabled={saving}
+                    className="px-3 py-2 bg-brand-500 text-white text-xs rounded-lg hover:bg-brand-600 disabled:opacity-50"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
+
+          {/* Extra Rolls for BOPP Tape (editable by production supervisor) */}
+          {canEditStages && (() => {
+            const boppItems = orderItems.filter((item: any) => item.productCategory === "BOPP_TAPE");
+            if (boppItems.length === 0) return null;
+            return (
+              <div className="space-y-3">
+                <p className="text-xs font-medium text-gray-600">Extra Rolls (BOPP Tape)</p>
+                <p className="text-xs text-gray-400 -mt-2">Rolls produced extra — will appear on challan</p>
+                {boppItems.map((item: any) => (
+                  <div key={item.id}>
+                    <label className="block text-xs text-gray-500 mb-1">
+                      Item {orderItems.indexOf(item) + 1} — {getProductCategoryLabel(item.productCategory)}
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        value={itemExtraRolls[item.id] ?? ""}
+                        onChange={(e) => setItemExtraRolls((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                        placeholder="0 extra rolls"
+                        className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      />
+                      <button
+                        onClick={() => handleItemExtraRollsSave(item.id)}
+                        disabled={saving}
+                        className="px-3 py-2 bg-brand-500 text-white text-xs rounded-lg hover:bg-brand-600 disabled:opacity-50"
+                      >
+                        <Save className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
 
           {canEditChallan && (
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Challan Number</label>
+              <label className="block text-xs font-medium text-gray-600 mb-1">{t("orderDetail.challanNumber")}</label>
               <div className="flex gap-2">
                 <input
                   type="text"
@@ -825,11 +957,11 @@ export default function OrderDetailPage() {
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
             <ImageIcon className="w-4 h-4 text-brand-500" />
-            Photos ({(order.attachments || []).length})
+            {t("orderDetail.photos")} ({(order.attachments || []).length})
           </h2>
           <label className="flex items-center gap-1.5 px-3 py-1.5 bg-brand-50 text-brand-600 text-xs font-medium rounded-lg cursor-pointer hover:bg-brand-100 transition-colors">
             <Paperclip className="w-3.5 h-3.5" />
-            {uploading ? "Uploading..." : "Upload"}
+            {uploading ? t("orderDetail.uploading") : t("orderDetail.upload")}
             <input
               ref={fileInputRef}
               type="file"
@@ -868,7 +1000,7 @@ export default function OrderDetailPage() {
             ))}
           </div>
         ) : (
-          <p className="text-xs text-gray-400 text-center py-4">No photos yet</p>
+          <p className="text-xs text-gray-400 text-center py-4">{t("orderDetail.noPhotos")}</p>
         )}
       </div>
 
@@ -876,7 +1008,7 @@ export default function OrderDetailPage() {
       <div className="bg-white rounded-xl border border-gray-200 p-4">
         <h2 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
           <MessageSquare className="w-4 h-4 text-brand-500" />
-          Notes & Comments ({(order.comments || []).length})
+          {t("orderDetail.notesComments")} ({(order.comments || []).length})
         </h2>
 
         {/* Post comment */}
@@ -886,7 +1018,7 @@ export default function OrderDetailPage() {
             value={commentText}
             onChange={(e) => setCommentText(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handlePostComment()}
-            placeholder="Add a note..."
+            placeholder={t("orderDetail.addNotePlaceholder")}
             className="flex-1 px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
           />
           <button
@@ -917,15 +1049,109 @@ export default function OrderDetailPage() {
             ))}
           </div>
         ) : (
-          <p className="text-xs text-gray-400 text-center py-2">No comments yet</p>
+          <p className="text-xs text-gray-400 text-center py-2">{t("orderDetail.noComments")}</p>
         )}
       </div>
 
       {/* Status Timeline */}
       <div className="bg-white rounded-xl border border-gray-200 p-4">
-        <h2 className="text-sm font-semibold text-gray-900 mb-4">Status History</h2>
+        <h2 className="text-sm font-semibold text-gray-900 mb-4">{t("orderDetail.statusLog")}</h2>
         <OrderStatusTimeline statusLogs={statusLogs} />
       </div>
+
+      {/* Item-level Raw Material N/A Modal */}
+      {showItemRawMaterialModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-xl">
+            <div className="px-5 pt-5 pb-2">
+              <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-red-500" />
+                {t("orderDetail.rawMaterialShortage")}
+              </h3>
+              <p className="text-sm text-gray-500 mt-1">
+                {t("orderDetail.materialQuestion")}
+              </p>
+            </div>
+            <div className="px-5 py-3">
+              <textarea
+                value={itemRawMaterialNote}
+                onChange={(e) => setItemRawMaterialNote(e.target.value)}
+                rows={3}
+                autoFocus
+                placeholder="e.g. BOPP film 42 micron finished, Core 3 inch not available..."
+                className="w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-400 resize-none"
+              />
+            </div>
+            <div className="flex gap-2 px-5 pb-5">
+              <button
+                onClick={() => {
+                  setShowItemRawMaterialModal(null);
+                  setItemRawMaterialNote("");
+                }}
+                className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50"
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                onClick={() => handleItemStatusUpdate(
+                  showItemRawMaterialModal.itemId,
+                  "RAW_MATERIAL_NA",
+                  itemRawMaterialNote || "Raw material not available"
+                )}
+                disabled={updatingStatus !== null}
+                className="flex-1 px-4 py-2.5 bg-red-500 text-white text-sm font-medium rounded-lg hover:bg-red-600 disabled:opacity-50"
+              >
+                {updatingStatus ? t("orderDetail.updating") : t("common.confirm")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Raw Material N/A Modal */}
+      {showRawMaterialModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-xl">
+            <div className="px-5 pt-5 pb-2">
+              <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-red-500" />
+                {t("orderDetail.rawMaterialShortage")}
+              </h3>
+              <p className="text-sm text-gray-500 mt-1">
+                {t("orderDetail.materialQuestion")}
+              </p>
+            </div>
+            <div className="px-5 py-3">
+              <textarea
+                value={rawMaterialNote}
+                onChange={(e) => setRawMaterialNote(e.target.value)}
+                rows={3}
+                autoFocus
+                placeholder="e.g. BOPP film 42 micron finished, Core 3 inch not available..."
+                className="w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-400 resize-none"
+              />
+            </div>
+            <div className="flex gap-2 px-5 pb-5">
+              <button
+                onClick={() => {
+                  setShowRawMaterialModal(false);
+                  setRawMaterialNote("");
+                }}
+                className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50"
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                onClick={() => handleStatusUpdate("RAW_MATERIAL_NA", rawMaterialNote || "Raw material not available")}
+                disabled={updatingStatus !== null}
+                className="flex-1 px-4 py-2.5 bg-red-500 text-white text-sm font-medium rounded-lg hover:bg-red-600 disabled:opacity-50"
+              >
+                {updatingStatus ? t("orderDetail.updating") : t("common.confirm")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

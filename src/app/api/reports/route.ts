@@ -13,11 +13,29 @@ export async function GET(request: NextRequest) {
   const month = parseInt(searchParams.get("month") || String(new Date().getMonth() + 1));
   const year = parseInt(searchParams.get("year") || String(new Date().getFullYear()));
 
+  const userRole = (session.user as any).role;
+  const userId = (session.user as any).id;
+
   // Date range for the month
   const startDate = new Date(year, month - 1, 1);
   const endDate = new Date(year, month, 1);
 
   try {
+    // For SALES role: include leads data
+    let leadsData = null;
+    if (userRole === "SALES" || userRole === "ADMIN") {
+      const salesWhere: any = { createdAt: { gte: startDate, lt: endDate } };
+      if (userRole === "SALES") salesWhere.salesPersonId = userId;
+
+      const [leadsCreated, leadsConverted, leadsFollowUp, leadsClosed] = await Promise.all([
+        prisma.lead.count({ where: salesWhere }),
+        prisma.lead.count({ where: { ...salesWhere, status: "CONVERTED" } }),
+        prisma.lead.count({ where: { ...salesWhere, status: "FOLLOW_UP" } }),
+        prisma.lead.count({ where: { ...salesWhere, status: "CLOSED_LOST" } }),
+      ]);
+      leadsData = { leadsCreated, leadsConverted, leadsFollowUp, leadsClosed };
+    }
+
     const [
       ordersInMonth,
       dispatchedLogs,
@@ -117,6 +135,8 @@ export async function GET(request: NextRequest) {
       statusWise,
       customerWise,
       dailyOrders,
+      leadsData,
+      userRole,
     });
   } catch (error) {
     console.error("Error fetching report:", error);

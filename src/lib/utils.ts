@@ -60,3 +60,12 @@ export function inchesToMm(inches: string): string {
 export function cn(...classes: (string | boolean | undefined | null)[]): string {
   return classes.filter(Boolean).join(" ");
 }
+
+export function safeParseJSON(value: unknown, fallback: Record<string, any> = {}): Record<string, any> {
+  if (!value) return fallback;
+  if (typeof value === "object") return value as Record<string, any>;
+  if (typeof value === "string") {
+    try { return JSON.parse(value); } catch { return fallback; }
+  }
+  return fallback;
+}

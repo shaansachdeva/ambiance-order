@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import OrderCard from "@/components/OrderCard";
-import { hasPermission, formatDate, getProductCategoryLabel } from "@/lib/utils";
+import { hasPermission, formatDate } from "@/lib/utils";
+import { useLanguage } from "@/contexts/LanguageContext";
 import type { UserRole } from "@/types";
 import { ArrowLeft, MapPin, Package, Calendar } from "lucide-react";
 import Link from "next/link";
@@ -16,6 +17,7 @@ export default function CustomerDetailPage() {
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const { t, tProduct } = useLanguage();
   const userRole = ((session?.user as any)?.role || "SALES") as UserRole;
   const showParty = hasPermission(userRole, "view_party");
 
@@ -44,9 +46,9 @@ export default function CustomerDetailPage() {
   if (!customer || customer.error) {
     return (
       <div className="text-center py-12">
-        <p className="text-gray-500">Customer not found.</p>
+        <p className="text-gray-500">{t("customers.notFound")}</p>
         <Link href="/customers" className="text-brand-500 text-sm mt-2 inline-block">
-          Back to Parties
+          {t("customers.backToParties")}
         </Link>
       </div>
     );
@@ -54,10 +56,6 @@ export default function CustomerDetailPage() {
 
   // Compute stats
   const totalOrders = orders.length;
-  const totalAmount = orders.reduce((sum, o) => {
-    const items = o.items || [];
-    return sum + items.reduce((s: number, i: any) => s + (i.amount || 0), 0);
-  }, 0);
   const productCategories = Array.from(new Set(orders.flatMap((o: any) =>
     (o.items || []).map((i: any) => i.productCategory).concat([o.productCategory])
   )));
@@ -84,20 +82,14 @@ export default function CustomerDetailPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 gap-3">
         <div className="bg-white rounded-xl border border-gray-200 p-4">
           <p className="text-2xl font-bold text-gray-900">{totalOrders}</p>
-          <p className="text-xs text-gray-500 mt-0.5">Total Orders</p>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <p className="text-2xl font-bold text-brand-600">
-            {totalAmount > 0 ? `Rs. ${Math.round(totalAmount).toLocaleString("en-IN")}` : "-"}
-          </p>
-          <p className="text-xs text-gray-500 mt-0.5">Total Amount</p>
+          <p className="text-xs text-gray-500 mt-0.5">{t("customers.totalOrders")}</p>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-4">
           <p className="text-2xl font-bold text-gray-900">{productCategories.length}</p>
-          <p className="text-xs text-gray-500 mt-0.5">Products</p>
+          <p className="text-xs text-gray-500 mt-0.5">{t("customers.products")}</p>
         </div>
       </div>
 
@@ -106,7 +98,7 @@ export default function CustomerDetailPage() {
         <div className="bg-white rounded-xl border border-gray-200 p-4">
           <h2 className="text-sm font-semibold text-gray-900 mb-2 flex items-center gap-2">
             <Package className="w-4 h-4 text-brand-500" />
-            Products Ordered
+            {t("customers.productsOrdered")}
           </h2>
           <div className="flex flex-wrap gap-2">
             {productCategories.map((cat) => (
@@ -114,7 +106,7 @@ export default function CustomerDetailPage() {
                 key={cat}
                 className="px-2.5 py-1 bg-gray-50 border border-gray-200 rounded-full text-xs font-medium text-gray-700"
               >
-                {getProductCategoryLabel(cat)}
+                {tProduct(cat)}
               </span>
             ))}
           </div>
@@ -125,11 +117,11 @@ export default function CustomerDetailPage() {
       <div>
         <h2 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
           <Calendar className="w-4 h-4 text-brand-500" />
-          Order History
+          {t("customers.orderHistory")}
         </h2>
         {orders.length === 0 ? (
           <div className="text-center py-8 bg-white rounded-xl border border-gray-200">
-            <p className="text-sm text-gray-500">No orders yet for this customer.</p>
+            <p className="text-sm text-gray-500">{t("customers.noOrdersYet")}</p>
           </div>
         ) : (
           <div className="space-y-2">
