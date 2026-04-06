@@ -1,5 +1,9 @@
 import { PrismaClient } from "@/generated/prisma/client";
 import path from "path";
+import dns from "dns";
+
+// Force IPv4 DNS resolution — EC2 can't reach Supabase over IPv6
+dns.setDefaultResultOrder("ipv4first");
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
