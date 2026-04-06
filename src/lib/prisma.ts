@@ -9,10 +9,14 @@ function createPrismaClient(): PrismaClient {
   const isPostgres = process.env.DB_PROVIDER === "postgresql";
 
   if (isPostgres) {
-    // Production: Supabase Postgres — standard PrismaClient, URL from DATABASE_URL env
-    // Type assertion needed because generated types depend on which schema was used for generation
-    // When built with `npm run build:prod`, the Postgres schema generates compatible types
-    return new (PrismaClient as any)();
+    // Production: Supabase Postgres — Prisma 7 requires a driver adapter
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { Pool } = require("pg");
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { PrismaPg } = require("@prisma/adapter-pg");
+    const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+    const adapter = new PrismaPg(pool);
+    return new (PrismaClient as any)({ adapter });
   } else {
     // Local dev: SQLite with better-sqlite3 adapter
     // eslint-disable-next-line @typescript-eslint/no-require-imports
