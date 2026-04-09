@@ -48,7 +48,7 @@ model Order {
 
   // Customer
   customerId String
-  customer   Customer @relation(fields: [customerId], references: [id])
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   // Product-specific details stored as JSON (legacy single-item)
   productDetails String // JSON string with product-specific fields
@@ -67,7 +67,7 @@ model Order {
 
   // Tracking
   createdById String
-  createdBy   User      @relation("CreatedBy", fields: [createdById], references: [id])
+  createdBy   User      @relation("CreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime? // soft delete — set when moved to recycle bin
@@ -81,12 +81,12 @@ model Order {
 model OrderStatusLog {
   id          String   @id @default(cuid())
   orderId     String
-  order       Order    @relation(fields: [orderId], references: [id])
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   fromStatus  String
   toStatus    String
   notes       String?
   changedById String
-  changedBy   User     @relation("ChangedBy", fields: [changedById], references: [id])
+  changedBy   User     @relation("ChangedBy", fields: [changedById], references: [id], onDelete: Cascade)
   changedAt   DateTime @default(now())
 }
 
@@ -119,7 +119,7 @@ model OrderItemStatusLog {
   toStatus    String
   notes       String?
   changedById String
-  changedBy   User      @relation("ItemChangedBy", fields: [changedById], references: [id])
+  changedBy   User      @relation("ItemChangedBy", fields: [changedById], references: [id], onDelete: Cascade)
   changedAt   DateTime  @default(now())
 }
 
@@ -128,7 +128,7 @@ model OrderComment {
   orderId   String
   order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   userId    String
-  user      User     @relation("UserComments", fields: [userId], references: [id])
+  user      User     @relation("UserComments", fields: [userId], references: [id], onDelete: Cascade)
   text      String
   createdAt DateTime @default(now())
 }
@@ -138,7 +138,7 @@ model OrderAttachment {
   orderId   String
   order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   userId    String
-  user      User     @relation("UserAttachments", fields: [userId], references: [id])
+  user      User     @relation("UserAttachments", fields: [userId], references: [id], onDelete: Cascade)
   fileName  String
   filePath  String
   fileType  String
@@ -165,7 +165,7 @@ model StockLog {
   quantity   Float
   notes      String?
   userId     String
-  user       User        @relation("UserStockChanges", fields: [userId], references: [id])
+  user       User        @relation("UserStockChanges", fields: [userId], references: [id], onDelete: Cascade)
   createdAt  DateTime    @default(now())
 }
 
@@ -183,7 +183,7 @@ model Lead {
   visitLongitude Float?  // GPS longitude captured at time of entry
 
   salesPersonId String
-  salesPerson   User   @relation("UserLeads", fields: [salesPersonId], references: [id])
+  salesPerson   User   @relation("UserLeads", fields: [salesPersonId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -220,7 +220,7 @@ model LeadFollowUp {
   leadId    String
   lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
   userId    String
-  user      User     @relation("UserLeadFollowUps", fields: [userId], references: [id])
+  user      User     @relation("UserLeadFollowUps", fields: [userId], references: [id], onDelete: Cascade)
   notes     String
   createdAt DateTime @default(now())
 }
