@@ -46,14 +46,6 @@ export async function DELETE(request: NextRequest) {
   const { ids } = await request.json();
   if (!Array.isArray(ids) || ids.length === 0) return NextResponse.json({ error: "ids required" }, { status: 400 });
 
-  const items = await prisma.orderItem.findMany({ where: { orderId: { in: ids } }, select: { id: true } });
-  const itemIds = items.map((i) => i.id);
-
-  await prisma.orderItemStatusLog.deleteMany({ where: { orderItemId: { in: itemIds } } });
-  await prisma.orderItem.deleteMany({ where: { orderId: { in: ids } } });
-  await prisma.orderStatusLog.deleteMany({ where: { orderId: { in: ids } } });
-  await prisma.orderComment.deleteMany({ where: { orderId: { in: ids } } });
-  await prisma.orderAttachment.deleteMany({ where: { orderId: { in: ids } } });
   const result = await prisma.order.deleteMany({ where: { id: { in: ids } } });
 
   return NextResponse.json({ deleted: result.count });
