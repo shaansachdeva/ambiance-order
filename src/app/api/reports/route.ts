@@ -46,6 +46,7 @@ export async function GET(request: NextRequest) {
       prisma.order.findMany({
         where: {
           createdAt: { gte: startDate, lt: endDate },
+          deletedAt: null,
         },
         include: { customer: true },
         orderBy: { createdAt: "asc" },

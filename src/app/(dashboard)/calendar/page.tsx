@@ -55,25 +55,41 @@ export default function CalendarPage() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   const userRole = ((session?.user as any)?.role || "SALES") as UserRole;
+  const userId   = (session?.user as any)?.id as string | undefined;
   const showParty = hasPermission(userRole, "view_party");
 
   useEffect(() => {
+    if (!session) return; // wait for session
     setLoading(true);
-    Promise.all([
-      fetch("/api/orders").then((r) => r.json()),
-      fetch("/api/leads").then((r) => r.json()),
-    ])
+
+    // Build orders query — SALES sees only their own orders, PRODUCTION sees all orders
+    const orderParams = new URLSearchParams();
+    if (userRole === "SALES" && userId) orderParams.set("createdById", userId);
+
+    // PRODUCTION doesn't see leads at all; SALES sees their own (API already filters by salesPersonId)
+    const showLeads = userRole !== "PRODUCTION";
+
+    const fetches: Promise<any>[] = [
+      fetch(`/api/orders?${orderParams}`).then((r) => r.json()),
+      ...(showLeads ? [fetch("/api/leads").then((r) => r.json())] : []),
+    ];
+
+    Promise.all(fetches)
       .then(([ordersData, leadsData]) => {
         const orderArr = Array.isArray(ordersData) ? ordersData : [];
-        setOrders(orderArr.filter((o: any) => o.deliveryDeadline));
+        // PRODUCTION: only show orders relevant to them (not dispatched ones unless deadline)
+        const filteredOrders = userRole === "PRODUCTION"
+          ? orderArr.filter((o: any) => o.deliveryDeadline && o.status !== "ORDER_PLACED")
+          : orderArr.filter((o: any) => o.deliveryDeadline);
+        setOrders(filteredOrders);
 
         const leadArr = Array.isArray(leadsData) ? leadsData : [];
-        setLeads(leadArr.filter((l: any) => l.nextFollowUp && l.status !== 'CONVERTED' && l.status !== 'CLOSED_LOST'));
-        
+        setLeads(leadArr.filter((l: any) => l.nextFollowUp && l.status !== "CONVERTED" && l.status !== "CLOSED_LOST"));
+
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, []);
+  }, [session, userRole, userId]);
 
   const prevMonth = () => {
     if (month === 0) {

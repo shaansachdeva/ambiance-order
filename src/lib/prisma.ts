@@ -33,4 +33,7 @@ function createPrismaClient(): PrismaClient {
 
 export const prisma = globalForPrisma.prisma ?? createPrismaClient();
 
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+// Always cache on globalThis — not just in dev.
+// In production, omitting this creates a new PrismaClient per module evaluation,
+// exhausting the connection pool under concurrent load.
+globalForPrisma.prisma = prisma;

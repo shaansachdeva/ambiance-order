@@ -14,8 +14,8 @@ export async function GET(
 
   const userRole = (session.user as any).role;
 
-  const order = await prisma.order.findUnique({
-    where: { id: params.id },
+  const order = await prisma.order.findFirst({
+    where: { id: params.id, deletedAt: null },
     include: {
       customer: true,
       items: {
@@ -102,8 +102,18 @@ export async function PATCH(
     } else if (userRole === "PRODUCTION") {
       if (jumboCode !== undefined) updateData.jumboCode = jumboCode;
       if (productionStages !== undefined) updateData.productionStages = productionStages;
+      // Production can change order status (confirm, start production, raw material NA, ready)
+      if (status !== undefined) updateData.status = status;
+    } else if (userRole === "SALES") {
+      if (remarks !== undefined) updateData.remarks = remarks;
+      if (deliveryDeadline !== undefined) {
+        updateData.deliveryDeadline = deliveryDeadline ? new Date(deliveryDeadline) : null;
+      }
+      if (priority !== undefined) updateData.priority = priority;
     } else if (userRole === "DISPATCH") {
       if (challanNumber !== undefined) updateData.challanNumber = challanNumber;
+      // Dispatch can mark as dispatched
+      if (status !== undefined) updateData.status = status;
     } else {
       return NextResponse.json(
         { error: "You do not have permission to update orders" },
@@ -212,9 +222,10 @@ export async function DELETE(
   }
 
   try {
-    // OrderStatusLog lacks onDelete: Cascade, so delete manually first
-    await prisma.orderStatusLog.deleteMany({ where: { orderId: params.id } });
-    await prisma.order.delete({ where: { id: params.id } });
+    await prisma.order.update({
+      where: { id: params.id },
+      data: { deletedAt: new Date() },
+    });
     return NextResponse.json({ success: true });
   } catch (error: any) {
     console.error("Error deleting order:", error);

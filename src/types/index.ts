@@ -118,11 +118,36 @@ export type ProductDetails =
   | BarcodeLabelDetails
   | ComputerStationeryDetails;
 
+// Per-user feature toggles (admin can grant/revoke per user via Settings)
+export interface UserFeature {
+  key: string;
+  label: string;
+  group: string;
+}
+
+export const USER_FEATURES: UserFeature[] = [
+  { key: "nav.orders",       label: "View Orders",             group: "Orders" },
+  { key: "nav.newOrder",     label: "Create New Orders",       group: "Orders" },
+  { key: "nav.calendar",     label: "Calendar",                group: "General" },
+  { key: "nav.parties",      label: "Parties / Customers",     group: "General" },
+  { key: "nav.inventory",    label: "Inventory",               group: "General" },
+  { key: "nav.calculator",   label: "Box Calculator",          group: "General" },
+  { key: "nav.barcode",      label: "Barcode Generator",       group: "General" },
+  { key: "nav.production",   label: "Production Queue",        group: "Production" },
+  { key: "nav.dispatched",   label: "Dispatched",              group: "Production" },
+  { key: "nav.dailyReport",  label: "Daily Production Report", group: "Production" },
+  { key: "nav.leads",        label: "Leads",                   group: "Sales" },
+  { key: "nav.reports",      label: "Reports",                 group: "Analytics" },
+  { key: "nav.activityLog",  label: "Activity Log",            group: "Admin" },
+  { key: "nav.recycleBin",   label: "Recycle Bin",             group: "Admin" },
+  { key: "nav.settings",     label: "Settings",                group: "Admin" },
+];
+
 // Role-based permissions
 export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
   ADMIN: ["create_order", "view_order", "view_party", "update_status", "update_order", "manage_users", "update_challan", "view_dashboard"],
   SALES: ["create_order", "view_order", "view_party", "view_dashboard"],
   PRODUCTION: ["view_order", "update_status", "update_jumbo_code", "view_dashboard"],
   DISPATCH: ["view_order", "update_status", "update_challan", "view_dashboard"],
-  ACCOUNTANT: ["view_order", "view_party", "update_order", "update_challan", "view_dashboard"],
+  ACCOUNTANT: ["view_order", "view_party", "update_status", "update_order", "update_challan", "view_dashboard"],
 };

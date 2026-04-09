@@ -12,17 +12,19 @@ export async function PATCH(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const userEmail = session.user.email;
-  const user = await prisma.user.findUnique({
-    where: { username: userEmail as string },
-  });
+  const sessionUserId = (session.user as any).id as string;
+  const sessionUserRole = (session.user as any).role as string;
 
-  if (!user || (!["ADMIN", "PRODUCTION", "DISPATCH"].includes(user.role))) {
+  if (!sessionUserId || !["ADMIN", "PRODUCTION", "DISPATCH", "SALES", "ACCOUNTANT"].includes(sessionUserRole)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  // Fetch user record only to pass to status log (needs DB id)
+  const user = await prisma.user.findUnique({ where: { id: sessionUserId } });
+  if (!user) return NextResponse.json({ error: "User not found" }, { status: 403 });
+
   try {
-    const { status, productionStages, notes, productDetails } = await request.json();
+    const { status, productionStages, notes, productDetails, rate } = await request.json();
 
     const existing = await prisma.orderItem.findUnique({
       where: { id: params.id },
@@ -34,8 +36,11 @@ export async function PATCH(
     }
 
     const updateData: any = {};
-    if (status !== undefined) updateData.status = status;
-    if (productionStages !== undefined) updateData.productionStages = productionStages;
+    // Role-based field restrictions
+    const canUpdateStatus = ["ADMIN", "PRODUCTION", "DISPATCH", "ACCOUNTANT"].includes(sessionUserRole);
+    if (status !== undefined && canUpdateStatus) updateData.status = status;
+    if (rate !== undefined) updateData.rate = rate === "" ? null : parseFloat(rate);
+    if (productionStages !== undefined && canUpdateStatus) updateData.productionStages = productionStages;
     if (productDetails !== undefined) {
       // Merge with existing productDetails so only changed keys are updated
       const existing_details = (() => {

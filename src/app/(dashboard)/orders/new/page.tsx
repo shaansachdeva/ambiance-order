@@ -9,7 +9,6 @@ import type { UserRole, ProductCategory } from "@/types";
 import { hasPermission } from "@/lib/utils";
 import toast, { Toaster } from "react-hot-toast";
 import { ArrowLeft, Send, Plus, Trash2, ChevronDown, ChevronUp, IndianRupee, ImagePlus, X } from "lucide-react";
-import Link from "next/link";
 import { useLanguage } from "@/contexts/LanguageContext";
 
 interface Customer {
@@ -65,6 +64,7 @@ export default function NewOrderPage() {
   const [submitting, setSubmitting] = useState(false);
   const [leadLoaded, setLeadLoaded] = useState(false);
   const [leadCompany, setLeadCompany] = useState("");
+  const [isDirty, setIsDirty] = useState(false);
 
   const userRole = ((session?.user as any)?.role || "SALES") as UserRole;
   const canCreate = hasPermission(userRole, "create_order");
@@ -157,7 +157,54 @@ export default function NewOrderPage() {
     }
   }, [sessionStatus, canCreate, router]);
 
+  // Warn before browser close/refresh when form is dirty
+  useEffect(() => {
+    if (!isDirty) return;
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isDirty]);
+
+  // Intercept browser back button when form is dirty
+  useEffect(() => {
+    if (!isDirty) return;
+    window.history.pushState(null, "", window.location.href);
+    const handler = () => {
+      window.history.pushState(null, "", window.location.href);
+      showBackConfirm();
+    };
+    window.addEventListener("popstate", handler);
+    return () => window.removeEventListener("popstate", handler);
+  }, [isDirty]);
+
+  const showBackConfirm = () => {
+    toast(
+      (t) => (
+        <div className="flex flex-col gap-2">
+          <p className="text-sm font-medium text-gray-900">Discard this order?</p>
+          <p className="text-xs text-gray-500">All entered data will be lost.</p>
+          <div className="flex gap-2 justify-end">
+            <button
+              onClick={() => toast.dismiss(t.id)}
+              className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200"
+            >
+              Keep editing
+            </button>
+            <button
+              onClick={() => { toast.dismiss(t.id); setIsDirty(false); router.push("/orders"); }}
+              className="px-3 py-1.5 text-xs font-medium text-white bg-red-500 rounded-lg hover:bg-red-600"
+            >
+              Discard
+            </button>
+          </div>
+        </div>
+      ),
+      { duration: Infinity }
+    );
+  };
+
   const updateItem = (id: string, updates: Partial<OrderItemData>) => {
+    setIsDirty(true);
     setItems((prev) =>
       prev.map((item) => (item.id === id ? { ...item, ...updates } : item))
     );
@@ -256,6 +303,7 @@ export default function NewOrderPage() {
             } catch { /* image upload failed silently */ }
           }
         }
+        setIsDirty(false);
         toast.success(`Order ${data.orderId} created successfully!`);
         setTimeout(() => router.push("/orders"), 500);
       } else {
@@ -278,12 +326,13 @@ export default function NewOrderPage() {
 
       {/* Header */}
       <div className="flex items-center gap-3 mb-6">
-        <Link
-          href="/orders"
+        <button
+          type="button"
+          onClick={() => isDirty ? showBackConfirm() : router.push("/orders")}
           className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
         >
           <ArrowLeft className="w-5 h-5 text-gray-600" />
-        </Link>
+        </button>
         <h1 className="text-xl font-bold text-gray-900">{leadId ? t("newOrder.confirmCreate") : t("newOrder.title")}</h1>
       </div>
 
@@ -310,7 +359,7 @@ export default function NewOrderPage() {
             <div className="space-y-2">
               <select
                 value={customerId}
-                onChange={(e) => setCustomerId(e.target.value)}
+                onChange={(e) => { setIsDirty(true); setCustomerId(e.target.value); }}
                 className="w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white"
               >
                 <option value="">{t("newOrder.selectParty")}</option>
@@ -599,7 +648,7 @@ export default function NewOrderPage() {
             </label>
             <textarea
               value={remarks}
-              onChange={(e) => setRemarks(e.target.value)}
+              onChange={(e) => { setIsDirty(true); setRemarks(e.target.value); }}
               rows={3}
               placeholder="Any special instructions..."
               className="w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"

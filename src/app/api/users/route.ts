@@ -22,6 +22,7 @@ export async function GET() {
       username: true,
       plainPassword: true,
       role: true,
+      customPermissions: true,
       active: true,
       createdAt: true,
       updatedAt: true,

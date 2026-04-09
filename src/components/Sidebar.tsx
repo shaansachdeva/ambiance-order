@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { signOut } from "next-auth/react";
+import { signOut, useSession } from "next-auth/react";
 import {
   LayoutDashboard,
   Package,
@@ -21,6 +21,8 @@ import {
   Activity,
   Languages,
   Calculator,
+  Trash2,
+  Barcode,
   X as CloseIcon,
 } from "lucide-react";
 import GlobalSearch from "@/components/GlobalSearch";
@@ -54,20 +56,28 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/production-report", labelKey: "nav.dailyReport", icon: ClipboardList, roles: ["ADMIN", "PRODUCTION"] },
   { href: "/reports", labelKey: "nav.reports", icon: BarChart3, roles: ["ADMIN", "SALES", "ACCOUNTANT"] },
   { href: "/activity-log", labelKey: "nav.activityLog", icon: Activity, roles: ["ADMIN"] },
+  { href: "/recycle-bin", labelKey: "nav.recycleBin", icon: Trash2, roles: ["ADMIN"] },
   { href: "/calculator", labelKey: "nav.calculator", icon: Calculator, roles: ["ADMIN"] },
+  { href: "/barcode", labelKey: "nav.barcode", icon: Barcode, roles: ["ADMIN"] },
   { href: "/orders/new", labelKey: "nav.newOrder", icon: PlusCircle, roles: ["ADMIN", "SALES"] },
   { href: "/settings", labelKey: "nav.settings", icon: Settings, roles: ["ADMIN"] },
 ];
 
-function getVisibleItems(role: UserRole): NavItem[] {
-  return NAV_ITEMS.filter(
-    (item) => item.roles === "all" || item.roles.includes(role)
-  );
+function getVisibleItems(role: UserRole, customPermissions: string[] | null): NavItem[] {
+  return NAV_ITEMS.filter((item) => {
+    const roleAllowed = item.roles === "all" || item.roles.includes(role);
+    if (!roleAllowed) return false;
+    // If admin set custom permissions for this user, also require the feature key to be in the list
+    if (customPermissions !== null) return customPermissions.includes(item.labelKey);
+    return true;
+  });
 }
 
 export default function Sidebar({ user }: SidebarProps) {
   const pathname = usePathname();
-  const visibleItems = getVisibleItems(user.role);
+  const { data: session } = useSession();
+  const customPermissions = (session?.user as any)?.customPermissions ?? null;
+  const visibleItems = getVisibleItems(user.role, customPermissions);
   const [showProfile, setShowProfile] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);

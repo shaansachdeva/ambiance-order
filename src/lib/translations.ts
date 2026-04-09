@@ -19,6 +19,8 @@ const translations = {
   "nav.dailyReport": { en: "Daily Report", hi: "दैनिक रिपोर्ट" },
   "nav.reports": { en: "Reports", hi: "रिपोर्ट" },
   "nav.activityLog": { en: "Activity Log", hi: "गतिविधि लॉग" },
+  "nav.recycleBin": { en: "Recycle Bin", hi: "रीसायकल बिन" },
+  "nav.barcode": { en: "Barcode Generator", hi: "बारकोड जनरेटर" },
   "nav.calculator": { en: "Box Calculator", hi: "बॉक्स कैलकुलेटर" },
   "nav.newOrder": { en: "New Order", hi: "नया ऑर्डर" },
   "nav.settings": { en: "Settings", hi: "सेटिंग्स" },

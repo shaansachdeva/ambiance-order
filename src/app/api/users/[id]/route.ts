@@ -18,7 +18,7 @@ export async function PATCH(
 
   try {
     const body = await request.json();
-    const { name, role, active, password } = body;
+    const { name, username, role, active, password, customPermissions } = body;
 
     // Non-admin users can only change their own password
     if (currentUserRole !== "ADMIN") {
@@ -26,7 +26,7 @@ export async function PATCH(
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
       // Non-admin can only update password
-      if (name !== undefined || role !== undefined || active !== undefined) {
+      if (name !== undefined || username !== undefined || role !== undefined || active !== undefined) {
         return NextResponse.json({ error: "Forbidden: You can only change your password" }, { status: 403 });
       }
     }
@@ -51,8 +51,15 @@ export async function PATCH(
     const updateData: any = {};
 
     if (name !== undefined) updateData.name = name;
+    if (username !== undefined) updateData.username = username;
     if (role !== undefined) updateData.role = role;
     if (active !== undefined) updateData.active = active;
+    if (customPermissions !== undefined) {
+      // null = reset to role defaults; array = custom feature list
+      updateData.customPermissions = customPermissions === null
+        ? null
+        : JSON.stringify(customPermissions);
+    }
     if (password !== undefined && password.trim() !== "") {
       updateData.password = await bcrypt.hash(password, 10);
       updateData.plainPassword = password;
@@ -80,5 +87,34 @@ export async function PATCH(
   } catch (error) {
     console.error("Error updating user:", error);
     return NextResponse.json({ error: "Failed to update user" }, { status: 500 });
+  }
+}
+
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const currentUserRole = (session.user as any).role;
+  const currentUserId = (session.user as any).id;
+
+  if (currentUserRole !== "ADMIN") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  if (params.id === currentUserId) {
+    return NextResponse.json({ error: "You cannot delete yourself" }, { status: 400 });
+  }
+
+  try {
+    await prisma.user.delete({ where: { id: params.id } });
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("Error deleting user:", error);
+    return NextResponse.json({ error: "Failed to delete user" }, { status: 500 });
   }
 }

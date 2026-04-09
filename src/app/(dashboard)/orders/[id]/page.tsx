@@ -40,20 +40,29 @@ import {
   IndianRupee,
   Zap,
   Trash2,
+  BadgeCheck,
+  Cog,
+  PackageCheck,
+  ChevronRight,
 } from "lucide-react";
 import Link from "next/link";
+
+const STATUS_ORDER: OrderStatus[] = [
+  "ORDER_PLACED", "CONFIRMED", "IN_PRODUCTION", "RAW_MATERIAL_NA", "READY_FOR_DISPATCH", "DISPATCHED",
+];
 
 const STATUS_BUTTONS: {
   status: OrderStatus;
   labelKey: TranslationKey;
-  color: string;
+  style: string;
+  icon: React.ReactNode;
   roles: string[];
 }[] = [
-  { status: "CONFIRMED", labelKey: "orderDetail.confirm", color: "bg-purple-500 hover:bg-purple-600", roles: ["ADMIN", "PRODUCTION"] },
-  { status: "IN_PRODUCTION", labelKey: "orderDetail.inProduction", color: "bg-amber-500 hover:bg-amber-600", roles: ["ADMIN", "PRODUCTION"] },
-  { status: "RAW_MATERIAL_NA", labelKey: "orderDetail.rawMaterialNA", color: "bg-red-500 hover:bg-red-600", roles: ["ADMIN", "PRODUCTION"] },
-  { status: "READY_FOR_DISPATCH", labelKey: "orderDetail.readyForDispatch", color: "bg-green-500 hover:bg-green-600", roles: ["ADMIN", "PRODUCTION"] },
-  { status: "DISPATCHED", labelKey: "orderDetail.dispatched", color: "bg-gray-500 hover:bg-gray-600", roles: ["ADMIN", "DISPATCH"] },
+  { status: "CONFIRMED", labelKey: "orderDetail.confirm", style: "border-purple-300 text-purple-700 bg-purple-50 hover:bg-purple-600 hover:text-white hover:border-purple-600", icon: <BadgeCheck className="w-3.5 h-3.5" />, roles: ["ADMIN", "PRODUCTION", "ACCOUNTANT"] },
+  { status: "IN_PRODUCTION", labelKey: "orderDetail.inProduction", style: "border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-500 hover:text-white hover:border-amber-500", icon: <Cog className="w-3.5 h-3.5" />, roles: ["ADMIN", "PRODUCTION", "ACCOUNTANT"] },
+  { status: "RAW_MATERIAL_NA", labelKey: "orderDetail.rawMaterialNA", style: "border-red-300 text-red-700 bg-red-50 hover:bg-red-500 hover:text-white hover:border-red-500", icon: <AlertTriangle className="w-3.5 h-3.5" />, roles: ["ADMIN", "PRODUCTION", "ACCOUNTANT"] },
+  { status: "READY_FOR_DISPATCH", labelKey: "orderDetail.readyForDispatch", style: "border-green-300 text-green-700 bg-green-50 hover:bg-green-600 hover:text-white hover:border-green-600", icon: <PackageCheck className="w-3.5 h-3.5" />, roles: ["ADMIN", "PRODUCTION", "ACCOUNTANT"] },
+  { status: "DISPATCHED", labelKey: "orderDetail.dispatched", style: "border-gray-300 text-gray-700 bg-gray-50 hover:bg-gray-600 hover:text-white hover:border-gray-600", icon: <Truck className="w-3.5 h-3.5" />, roles: ["ADMIN", "DISPATCH"] },
 ];
 
 export default function OrderDetailPage() {
@@ -98,6 +107,8 @@ export default function OrderDetailPage() {
   const [itemJumboCodes, setItemJumboCodes] = useState<Record<string, string>>({});
   // Per-item extra rolls (for BOPP_TAPE items — set by production supervisor)
   const [itemExtraRolls, setItemExtraRolls] = useState<Record<string, string>>({});
+  // Per-item rates (editable by SALES)
+  const [itemRates, setItemRates] = useState<Record<string, string>>({});
 
   const { t, tStatus, tProduct } = useLanguage();
 
@@ -111,7 +122,10 @@ export default function OrderDetailPage() {
 
   const fetchOrder = () => {
     fetch(`/api/orders/${id}`)
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
       .then((data) => {
         setOrder(data);
         setEditRemarks(data.remarks || "");
@@ -134,11 +148,19 @@ export default function OrderDetailPage() {
             } catch {}
           }
         }
+        const rates: Record<string, string> = {};
+        for (const item of data.items || []) {
+          rates[item.id] = item.rate != null ? String(item.rate) : "";
+        }
         setItemJumboCodes(codes);
         setItemExtraRolls(rolls);
+        setItemRates(rates);
         setLoading(false);
       })
-      .catch(() => setLoading(false));
+      .catch(() => {
+        setOrder(null);
+        setLoading(false);
+      });
   };
 
   useEffect(() => {
@@ -203,6 +225,28 @@ export default function OrderDetailPage() {
       toast.error(t("common.error"));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleContinueToProduction = async () => {
+    setUpdatingStatus("order-continue");
+    try {
+      const res = await fetch(`/api/orders/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "IN_PRODUCTION" }),
+      });
+      if (res.ok) {
+        toast.success(t("orderDetail.statusUpdated"));
+        fetchOrder();
+      } else {
+        const data = await res.json();
+        toast.error(data.error || t("common.failedToUpdate"));
+      }
+    } catch {
+      toast.error(t("common.error"));
+    } finally {
+      setUpdatingStatus(null);
     }
   };
 
@@ -383,6 +427,27 @@ export default function OrderDetailPage() {
     }
   };
 
+  const handleItemRateSave = async (itemId: string) => {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/order-items/${itemId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rate: itemRates[itemId] }),
+      });
+      if (res.ok) {
+        toast.success(t("orderDetail.saved"));
+        fetchOrder();
+      } else {
+        toast.error(t("orderDetail.failedToSave"));
+      }
+    } catch {
+      toast.error(t("common.error"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // Comments
   const handlePostComment = async () => {
     if (!commentText.trim()) return;
@@ -542,6 +607,16 @@ export default function OrderDetailPage() {
             <Pencil className="w-3.5 h-3.5" />
             {t("orderDetail.editOrder")}
           </Link>
+        )}
+        {canUpdateStatus && order.status === "RAW_MATERIAL_NA" && ["ADMIN", "PRODUCTION", "ACCOUNTANT"].includes(userRole) && (
+          <button
+            onClick={handleContinueToProduction}
+            disabled={updatingStatus === "order-continue"}
+            className="flex items-center gap-1.5 px-3 py-2 bg-amber-50 border border-amber-300 rounded-lg text-xs font-semibold text-amber-700 hover:bg-amber-500 hover:text-white hover:border-amber-500 transition-colors disabled:opacity-50"
+          >
+            <Cog className={`w-3.5 h-3.5 ${updatingStatus === "order-continue" ? "animate-spin" : ""}`} />
+            Continue to Production
+          </button>
         )}
         {userRole === "ADMIN" && (
           <button
@@ -709,12 +784,32 @@ export default function OrderDetailPage() {
                       </div>
                     );
                   })}
-                  {item.rate && (
+                  {userRole === "SALES" ? (
+                    <div className="text-xs col-span-2 sm:col-span-1">
+                      <span className="text-gray-500 block mb-0.5">{t("challan.rate")} (₹)</span>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="number"
+                          value={itemRates[item.id] ?? ""}
+                          onChange={(e) => setItemRates((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                          placeholder="0.00"
+                          className="w-24 px-2 py-1 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                        />
+                        <button
+                          onClick={() => handleItemRateSave(item.id)}
+                          disabled={saving}
+                          className="text-xs px-2 py-1 bg-brand-500 text-white rounded-lg hover:bg-brand-600 disabled:opacity-50"
+                        >
+                          {saving ? "..." : "Save"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : item.rate && userRole !== "PRODUCTION" ? (
                     <div className="text-xs">
                       <span className="text-gray-500 block mb-0.5">{t("challan.rate")}</span>
                       <span className="text-gray-900 font-medium">₹{item.rate}</span>
                     </div>
-                  )}
+                  ) : null}
                 </div>
 
                 {/* Production Stages */}
@@ -757,22 +852,47 @@ export default function OrderDetailPage() {
                   <div className="px-4 py-3 bg-gray-50/50 border-t border-gray-100">
                     <p className="text-xs font-medium text-gray-500 mb-2">{t("orderDetail.updateStatus")}</p>
                     <div className="flex flex-wrap gap-2">
+                      {/* Continue to Production — shown only when item is RAW_MATERIAL_NA */}
+                      {item.status === "RAW_MATERIAL_NA" && ["ADMIN", "PRODUCTION", "ACCOUNTANT"].includes(userRole) && (
+                        <button
+                          onClick={() => handleItemStatusUpdate(item.id, "IN_PRODUCTION")}
+                          disabled={updatingStatus !== null}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border-2 transition-all disabled:opacity-40 active:scale-95 border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-500 hover:text-white hover:border-amber-500"
+                        >
+                          {updatingStatus === (item.id + "IN_PRODUCTION") ? (
+                            <Cog className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Cog className="w-3.5 h-3.5" />
+                          )}
+                          {updatingStatus === (item.id + "IN_PRODUCTION") ? "..." : "Continue to Production"}
+                          {updatingStatus !== (item.id + "IN_PRODUCTION") && <ChevronRight className="w-3 h-3 opacity-60" />}
+                        </button>
+                      )}
                       {STATUS_BUTTONS.filter(
-                        (btn) => btn.roles.includes(userRole) && btn.status !== item.status
+                        (btn) =>
+                          btn.roles.includes(userRole) &&
+                          STATUS_ORDER.indexOf(btn.status) > STATUS_ORDER.indexOf(item.status as OrderStatus)
                       ).map((btn) => {
                         const isBlocked =
                           hasRawMaterialBlock &&
                           item.status !== "RAW_MATERIAL_NA" &&
                           (btn.status === "READY_FOR_DISPATCH" || btn.status === "DISPATCHED");
+                        const isUpdating = updatingStatus === (item.id + btn.status);
                         return (
                           <button
                             key={btn.status}
                             onClick={() => !isBlocked && handleItemStatusUpdate(item.id, btn.status)}
                             disabled={updatingStatus !== null || isBlocked}
                             title={isBlocked ? t("orderDetail.resolveRawMaterial") : undefined}
-                            className={`px-3 py-1.5 text-white text-xs font-medium rounded-lg transition-all disabled:opacity-40 active:scale-95 ${btn.color}`}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border-2 transition-all disabled:opacity-40 active:scale-95 ${btn.style}`}
                           >
-                            {updatingStatus === (item.id + btn.status) ? "..." : t(btn.labelKey)}
+                            {isUpdating ? (
+                              <Cog className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              btn.icon
+                            )}
+                            {isUpdating ? "..." : t(btn.labelKey)}
+                            {!isUpdating && <ChevronRight className="w-3 h-3 opacity-60" />}
                           </button>
                         );
                       })}

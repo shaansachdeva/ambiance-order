@@ -28,12 +28,12 @@ export async function GET() {
       allOrders,
       ordersByCategory,
     ] = await Promise.all([
-      // Total orders
-      prisma.order.count(),
+      // Total orders (exclude soft-deleted)
+      prisma.order.count({ where: { deletedAt: null } }),
 
-      // Pending orders (not dispatched)
+      // Pending orders (not dispatched, exclude soft-deleted)
       prisma.order.count({
-        where: { status: { not: "DISPATCHED" } },
+        where: { status: { not: "DISPATCHED" }, deletedAt: null },
       }),
 
       // Today's production: orders that had status changed to IN_PRODUCTION today
@@ -51,17 +51,18 @@ export async function GET() {
 
       // Ready for dispatch
       prisma.order.count({
-        where: { status: "READY_FOR_DISPATCH" },
+        where: { status: "READY_FOR_DISPATCH", deletedAt: null },
       }),
 
       // Dispatched
       prisma.order.count({
-        where: { status: "DISPATCHED" },
+        where: { status: "DISPATCHED", deletedAt: null },
       }),
 
       // Raw Material N/A: orders where any item (or the order itself) is RAW_MATERIAL_NA
       prisma.order.count({
         where: {
+          deletedAt: null,
           status: { not: "DISPATCHED" },
           OR: [
             { status: "RAW_MATERIAL_NA" },
@@ -72,6 +73,7 @@ export async function GET() {
 
       // Recent 10 orders with customer
       prisma.order.findMany({
+        where: { deletedAt: null },
         take: 10,
         orderBy: { createdAt: "desc" },
         include: { customer: true },
@@ -80,6 +82,7 @@ export async function GET() {
       // All non-dispatched orders for deadline check
       prisma.order.findMany({
         where: {
+          deletedAt: null,
           status: { not: "DISPATCHED" },
           deliveryDeadline: { not: null },
         },
@@ -89,6 +92,7 @@ export async function GET() {
       // Orders grouped by productCategory
       prisma.order.groupBy({
         by: ["productCategory"],
+        where: { deletedAt: null },
         _count: { id: true },
       }),
     ]);

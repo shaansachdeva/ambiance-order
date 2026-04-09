@@ -386,40 +386,32 @@ export default function OrdersPage() {
               default:
                 return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
             }
-          }).map((order: any) => {
-            const isOverdue =
-              order.deliveryDeadline &&
-              new Date(order.deliveryDeadline) < new Date() &&
-              order.status !== "DISPATCHED";
-
-            return (
-              <div key={order.id} className={isOverdue && !selectionMode ? "ring-2 ring-red-300 rounded-xl" : ""}>
-                <OrderCard
-                  order={{
-                    id: order.id,
-                    orderId: order.orderId,
-                    productCategory: order.items?.length > 0
-                      ? order.items[0].productCategory
-                      : order.productCategory,
-                    status: order.status,
-                    productDetails:
-                      order.items?.length > 0
-                        ? safeParseJSON(order.items[0].productDetails)
-                        : safeParseJSON(order.productDetails),
-                    partyName: order.customer?.partyName,
-                    createdAt: order.createdAt,
-                    deliveryDeadline: order.deliveryDeadline,
-                    priority: order.priority,
-                    itemCount: order.items?.length || 0,
-                  }}
-                  showParty={showParty}
-                  selectionMode={selectionMode}
-                  isSelected={selectedIds.has(order.id)}
-                  onToggle={() => toggleSelect(order.id)}
-                />
-              </div>
-            );
-          })}
+          }).map((order: any) => (
+            <OrderCard
+              key={order.id}
+              order={{
+                id: order.id,
+                orderId: order.orderId,
+                productCategory: order.items?.length > 0
+                  ? order.items[0].productCategory
+                  : order.productCategory,
+                status: order.status,
+                productDetails:
+                  order.items?.length > 0
+                    ? safeParseJSON(order.items[0].productDetails)
+                    : safeParseJSON(order.productDetails),
+                partyName: order.customer?.partyName,
+                createdAt: order.createdAt,
+                deliveryDeadline: order.deliveryDeadline,
+                priority: order.priority,
+                itemCount: order.items?.length || 0,
+              }}
+              showParty={showParty}
+              selectionMode={selectionMode}
+              isSelected={selectedIds.has(order.id)}
+              onToggle={() => toggleSelect(order.id)}
+            />
+          ))}
         </div>
       )}
 

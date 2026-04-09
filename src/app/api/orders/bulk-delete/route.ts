@@ -19,9 +19,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "No order IDs provided" }, { status: 400 });
   }
 
-  // Delete order items first (foreign key constraint), then orders
-  await prisma.orderItem.deleteMany({ where: { orderId: { in: ids } } });
-  const result = await prisma.order.deleteMany({ where: { id: { in: ids } } });
+  // Soft delete — move to recycle bin
+  const result = await prisma.order.updateMany({
+    where: { id: { in: ids } },
+    data: { deletedAt: new Date() },
+  });
 
   return NextResponse.json({ deleted: result.count });
 }

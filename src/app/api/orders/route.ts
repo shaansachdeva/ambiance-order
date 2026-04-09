@@ -16,10 +16,13 @@ export async function GET(request: NextRequest) {
   const search = searchParams.get("search");
   const customerId = searchParams.get("customerId");
   const priority = searchParams.get("priority");
+  const createdById = searchParams.get("createdById");
 
   const userRole = (session.user as any).role;
 
   const andConditions: any[] = [];
+
+  if (createdById) andConditions.push({ createdById });
 
   if (status === "RAW_MATERIAL_NA") {
     // Include orders where order-level OR any item is RAW_MATERIAL_NA
@@ -47,23 +50,35 @@ export async function GET(request: NextRequest) {
   if (customerId) andConditions.push({ customerId });
   if (priority) andConditions.push({ priority });
 
-  const where: any = andConditions.length > 0 ? { AND: andConditions } : {};
+  // Always exclude soft-deleted orders
+  andConditions.push({ deletedAt: null });
+  const where: any = { AND: andConditions };
+
+  // For RAW_MATERIAL_NA queries include item statusLogs so UI can show which material is missing
+  const includeItemNotes = status === "RAW_MATERIAL_NA";
 
   const orders = await prisma.order.findMany({
     where,
     include: {
-      customer: userRole === "PRODUCTION" ? false : true,
-      items: true,
+      ...(userRole !== "PRODUCTION" && { customer: true }),
+      items: includeItemNotes
+        ? {
+            include: {
+              statusLogs: {
+                where: { toStatus: "RAW_MATERIAL_NA" },
+                orderBy: { changedAt: "desc" },
+                take: 1,
+                select: { notes: true, changedAt: true },
+              },
+            },
+          }
+        : true,
     },
     orderBy: { createdAt: "desc" },
   });
 
   if (userRole === "PRODUCTION") {
-    const ordersWithNullCustomer = orders.map((order) => ({
-      ...order,
-      customer: null,
-    }));
-    return NextResponse.json(ordersWithNullCustomer);
+    return NextResponse.json(orders.map((o) => ({ ...o, customer: null })));
   }
 
   return NextResponse.json(orders);
@@ -92,11 +107,13 @@ export async function POST(request: NextRequest) {
 
     const userId = (session.user as any).id;
 
-    // Auto-generate orderId
-    const counter = await prisma.counter.upsert({
-      where: { id: "order_counter" },
-      update: { value: { increment: 1 } },
-      create: { id: "order_counter", value: 1 },
+    // Auto-generate orderId — wrapped in transaction for atomicity under concurrent requests
+    const counter = await prisma.$transaction(async (tx) => {
+      return tx.counter.upsert({
+        where: { id: "order_counter" },
+        update: { value: { increment: 1 } },
+        create: { id: "order_counter", value: 1 },
+      });
     });
 
     const orderId = formatOrderId(counter.value);

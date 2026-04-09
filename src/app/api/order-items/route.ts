@@ -14,7 +14,9 @@ export async function GET(request: NextRequest) {
   
   try {
     const items = await prisma.orderItem.findMany({
-      where: includeDispatched ? {} : { status: { not: "DISPATCHED" } },
+      where: includeDispatched
+        ? { order: { deletedAt: null } }
+        : { status: { not: "DISPATCHED" }, order: { deletedAt: null } },
       include: {
         order: {
           include: {

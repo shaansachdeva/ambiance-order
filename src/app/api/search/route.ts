@@ -24,6 +24,7 @@ export async function GET(request: NextRequest) {
       // Search orders by orderId or product category
       prisma.order.findMany({
         where: {
+          deletedAt: null,
           OR: [
             { orderId: { contains: q } },
             { productCategory: { contains: q } },

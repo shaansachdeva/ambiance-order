@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
   const year = searchParams.get("year");
   const status = searchParams.get("status");
 
-  const where: any = {};
+  const where: any = { deletedAt: null };
   if (status) where.status = status;
   if (month && year) {
     const m = parseInt(month);
