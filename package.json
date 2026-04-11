@@ -22,6 +22,7 @@
     "cookie": "^1.1.1",
     "date-fns": "^4.1.0",
     "html2canvas": "^1.4.1",
+    "html2canvas-pro": "^2.0.2",
     "jsbarcode": "^3.12.3",
     "jsonwebtoken": "^9.0.3",
     "jspdf": "^4.2.1",
@@ -33,6 +34,7 @@
     "react": "^18",
     "react-dom": "^18",
     "react-hot-toast": "^2.6.0",
+    "react-rnd": "^10.5.3",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

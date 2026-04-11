@@ -58,16 +58,19 @@ export const authOptions: AuthOptions = {
       if (session.user) {
         (session.user as any).role = token.role;
         (session.user as any).id = token.id;
-        // Always fetch fresh customPermissions from DB so changes take effect immediately
+        // Always fetch fresh role and customPermissions from DB so changes take effect immediately
         try {
           const dbUser = await prisma.user.findUnique({
             where: { id: token.id as string },
-            select: { customPermissions: true },
+            select: { role: true, customPermissions: true },
           });
-          const raw = dbUser?.customPermissions;
-          (session.user as any).customPermissions = raw
-            ? (JSON.parse(raw) as string[])
-            : null;
+          if (dbUser) {
+            (session.user as any).role = dbUser.role;
+            const raw = dbUser.customPermissions;
+            (session.user as any).customPermissions = raw
+              ? (JSON.parse(raw) as string[])
+              : null;
+          }
         } catch {
           (session.user as any).customPermissions = null;
         }
