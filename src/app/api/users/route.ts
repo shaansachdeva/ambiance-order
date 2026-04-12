@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -15,7 +15,11 @@ export async function GET() {
     return NextResponse.json({ error: "Forbidden: Admin access required" }, { status: 403 });
   }
 
+  const { searchParams } = new URL(request.url);
+  const roleFilter = searchParams.get("role");
+
   const users = await prisma.user.findMany({
+    where: roleFilter ? { role: roleFilter } : undefined,
     select: {
       id: true,
       name: true,

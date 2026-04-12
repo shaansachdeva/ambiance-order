@@ -12,6 +12,7 @@ import {
   hasPermission,
   getProductCategoryLabel,
   getStatusLabel,
+  safeParseJSON,
 } from "@/lib/utils";
 import { useLanguage } from "@/contexts/LanguageContext";
 import type { TranslationKey } from "@/lib/translations";
@@ -44,8 +45,10 @@ import {
   Cog,
   PackageCheck,
   ChevronRight,
+  Tag,
 } from "lucide-react";
 import Link from "next/link";
+import OrderLabelModal from "@/components/OrderLabelModal";
 
 const STATUS_ORDER: OrderStatus[] = [
   "ORDER_PLACED", "CONFIRMED", "IN_PRODUCTION", "RAW_MATERIAL_NA", "READY_FOR_DISPATCH", "DISPATCHED",
@@ -68,7 +71,7 @@ const STATUS_BUTTONS: {
 export default function OrderDetailPage() {
   const { id } = useParams();
   const router = useRouter();
-  const { data: session } = useSession();
+  const { data: session, status: sessionStatus } = useSession();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [order, setOrder] = useState<any>(null);
@@ -76,57 +79,66 @@ export default function OrderDetailPage() {
   const [statusNotes, setStatusNotes] = useState("");
   const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
 
-  // Editable fields
+  // Inline edit states
   const [editRemarks, setEditRemarks] = useState("");
   const [editDeadline, setEditDeadline] = useState("");
   const [editJumboCode, setEditJumboCode] = useState("");
   const [editChallan, setEditChallan] = useState("");
   const [saving, setSaving] = useState(false);
 
-  // Edit order mode
+  // Product editing
   const [isEditing, setIsEditing] = useState(false);
-  const [editCategory, setEditCategory] = useState<ProductCategory | "">("");
+  const [editCategory, setEditCategory] = useState<ProductCategory>("BOPP_TAPE");
   const [editProductDetails, setEditProductDetails] = useState<Record<string, string>>({});
 
-  // Comments
-  const [commentText, setCommentText] = useState("");
-  const [postingComment, setPostingComment] = useState(false);
+  // Per-item states
+  const [itemJumboCodes, setItemJumboCodes] = useState<Record<string, string>>({});
+  const [itemExtraBoxes, setItemExtraBoxes] = useState<Record<string, string>>({});
+  const [itemExtraRolls, setItemExtraRolls] = useState<Record<string, string>>({});
+  const [itemRates, setItemRates] = useState<Record<string, string>>({});
 
-  // Attachments
-  const [uploading, setUploading] = useState(false);
-
-  // Raw Material N/A modal (order-level)
+  // Raw material modal
   const [showRawMaterialModal, setShowRawMaterialModal] = useState(false);
   const [rawMaterialNote, setRawMaterialNote] = useState("");
-
-  // Raw Material N/A modal (item-level)
   const [showItemRawMaterialModal, setShowItemRawMaterialModal] = useState<{ itemId: string } | null>(null);
   const [itemRawMaterialNote, setItemRawMaterialNote] = useState("");
 
-  // Per-item jumbo codes (for BOPP_TAPE items)
-  const [itemJumboCodes, setItemJumboCodes] = useState<Record<string, string>>({});
-  // Per-item extra rolls (for BOPP_TAPE items — set by production supervisor)
-  const [itemExtraRolls, setItemExtraRolls] = useState<Record<string, string>>({});
-  // Per-item rates (editable by SALES)
-  const [itemRates, setItemRates] = useState<Record<string, string>>({});
+  // Comments & attachments
+  const [commentText, setCommentText] = useState("");
+  const [postingComment, setPostingComment] = useState(false);
+  const [uploading, setUploading] = useState(false);
+
+  // Label print modal
+  const [showLabelModal, setShowLabelModal] = useState(false);
 
   const { t, tStatus, tProduct } = useLanguage();
 
   const userRole = ((session?.user as any)?.role || "SALES") as UserRole;
-  const showParty = hasPermission(userRole, "view_party");
-  const canUpdateStatus = hasPermission(userRole, "update_status");
-  const canEditOrder = userRole === "ADMIN" || userRole === "ACCOUNTANT" || userRole === "SALES";
-  const canEditJumbo = userRole === "PRODUCTION" || userRole === "ADMIN";
-  const canEditChallan = userRole === "DISPATCH" || userRole === "ACCOUNTANT" || userRole === "ADMIN";
-  const canEditStages = userRole === "PRODUCTION" || userRole === "ADMIN";
+  const customPermissions = (session?.user as any)?.customPermissions ?? null;
+
+  // Only treat as "loading" when we have no session data at all.
+  // If session data exists (even during a background refetch) use it directly —
+  // this prevents the status-buttons from disappearing on page refresh.
+  const isSessionLoading = !session && sessionStatus === "loading";
+  const showParty = !isSessionLoading && hasPermission(userRole, "view_party", customPermissions);
+  const canUpdateStatus = !isSessionLoading && hasPermission(userRole, "update_status", customPermissions);
+  const canEditOrder = !isSessionLoading && (userRole === "ADMIN" || userRole === "ACCOUNTANT" || userRole === "SALES");
+  const canEditJumbo = !isSessionLoading && (userRole === "PRODUCTION" || userRole === "ADMIN" || userRole === "ACCOUNTANT");
+  const canEditChallan = !isSessionLoading && (userRole === "DISPATCH" || userRole === "ACCOUNTANT" || userRole === "ADMIN");
+  const canEditStages = !isSessionLoading && (userRole === "PRODUCTION" || userRole === "ADMIN" || userRole === "ACCOUNTANT");
+  const canPrintLabel = !isSessionLoading && (userRole === "ADMIN" || userRole === "ACCOUNTANT");
 
   const fetchOrder = () => {
-    fetch(`/api/orders/${id}`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
-      .then((data) => {
+    // Disable cache to ensure we get the fresh order immediately after creation
+    fetch(`/api/orders/${id}`, { cache: 'no-store' })
+      .then(async (res) => {
+        const data = await res.json();
+        if (!res.ok) {
+          setOrder({ error: data.error || "Failed to load order" });
+          setLoading(false);
+          return;
+        }
+        
         setOrder(data);
         setEditRemarks(data.remarks || "");
         setEditDeadline(
@@ -136,16 +148,16 @@ export default function OrderDetailPage() {
         );
         setEditJumboCode(data.jumboCode || "");
         setEditChallan(data.challanNumber || "");
-        // Init per-item jumbo codes and extra rolls for BOPP_TAPE items
+        // Init per-item jumbo codes, extra boxes and extra rolls for BOPP_TAPE items
         const codes: Record<string, string> = {};
+        const boxes: Record<string, string> = {};
         const rolls: Record<string, string> = {};
         for (const item of data.items || []) {
           if (item.productCategory === "BOPP_TAPE") {
-            try {
-              const d = typeof item.productDetails === "string" ? JSON.parse(item.productDetails) : item.productDetails || {};
-              codes[item.id] = d.jumboCode || "";
-              rolls[item.id] = d.extraRolls || "";
-            } catch {}
+            const d = safeParseJSON(item.productDetails);
+            codes[item.id] = d.jumboCode || "";
+            rolls[item.id] = d.extraRolls || "";
+            boxes[item.id] = d.extraBoxes || "";
           }
         }
         const rates: Record<string, string> = {};
@@ -153,12 +165,14 @@ export default function OrderDetailPage() {
           rates[item.id] = item.rate != null ? String(item.rate) : "";
         }
         setItemJumboCodes(codes);
+        setItemExtraBoxes(boxes);
         setItemExtraRolls(rolls);
         setItemRates(rates);
         setLoading(false);
       })
-      .catch(() => {
-        setOrder(null);
+      .catch((err) => {
+        console.error("Fetch error:", err);
+        setOrder({ error: "Network error or failed to parse response" });
         setLoading(false);
       });
   };
@@ -290,10 +304,7 @@ export default function OrderDetailPage() {
   };
 
   const startEditing = () => {
-    const details =
-      typeof order.productDetails === "string"
-        ? JSON.parse(order.productDetails)
-        : order.productDetails;
+    const details = safeParseJSON(order.productDetails);
     setEditCategory(order.productCategory as ProductCategory);
     setEditProductDetails(details);
     setIsEditing(true);
@@ -326,9 +337,7 @@ export default function OrderDetailPage() {
   };
 
   const handleItemStageToggle = async (itemId: string, currentStagesRaw: string | null, stage: string) => {
-    const currentStages = currentStagesRaw
-      ? JSON.parse(currentStagesRaw)
-      : { printing: false, coating: false, slitting: false };
+    const currentStages = safeParseJSON(currentStagesRaw);
     const updated = { ...currentStages, [stage]: !currentStages[stage] };
 
     try {
@@ -344,6 +353,54 @@ export default function OrderDetailPage() {
     } catch {
       toast.error("Failed to update stage");
     }
+  };
+
+  // Confirmation toast before status change
+  const confirmStatusUpdate = (newStatus: string) => {
+    // RAW_MATERIAL_NA already has its own modal — pass straight through
+    if (newStatus === "RAW_MATERIAL_NA") { handleStatusUpdate(newStatus); return; }
+    const toStatus = tStatus(newStatus);
+    toast(
+      (ti) => (
+        <div className="flex flex-col gap-2 min-w-[220px]">
+          <p className="text-sm font-medium text-gray-900">Change status to <span className="font-bold">{toStatus}</span>?</p>
+          <div className="flex gap-2 justify-end">
+            <button onClick={() => toast.dismiss(ti.id)}
+              className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200">
+              Cancel
+            </button>
+            <button onClick={() => { toast.dismiss(ti.id); handleStatusUpdate(newStatus); }}
+              className="px-3 py-1.5 text-xs font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600">
+              Confirm
+            </button>
+          </div>
+        </div>
+      ),
+      { duration: 8000 }
+    );
+  };
+
+  const confirmItemStatusUpdate = (itemId: string, newStatus: string) => {
+    // RAW_MATERIAL_NA has its own modal
+    if (newStatus === "RAW_MATERIAL_NA") { handleItemStatusUpdate(itemId, newStatus); return; }
+    toast(
+      (ti) => (
+        <div className="flex flex-col gap-2 min-w-[220px]">
+          <p className="text-sm font-medium text-gray-900">Change item status to <span className="font-bold">{tStatus(newStatus)}</span>?</p>
+          <div className="flex gap-2 justify-end">
+            <button onClick={() => toast.dismiss(ti.id)}
+              className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200">
+              Cancel
+            </button>
+            <button onClick={() => { toast.dismiss(ti.id); handleItemStatusUpdate(itemId, newStatus); }}
+              className="px-3 py-1.5 text-xs font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600">
+              Confirm
+            </button>
+          </div>
+        </div>
+      ),
+      { duration: 8000 }
+    );
   };
 
   const handleItemStatusUpdate = async (itemId: string, newStatus: string, notes?: string) => {
@@ -389,6 +446,29 @@ export default function OrderDetailPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           productDetails: { jumboCode: itemJumboCodes[itemId] || "" },
+        }),
+      });
+      if (res.ok) {
+        toast.success(t("orderDetail.saved"));
+        fetchOrder();
+      } else {
+        toast.error(t("orderDetail.failedToSave"));
+      }
+    } catch {
+      toast.error(t("common.error"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleItemExtraBoxesSave = async (itemId: string) => {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/order-items/${itemId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          productDetails: { extraBoxes: itemExtraBoxes[itemId] || "" },
         }),
       });
       if (res.ok) {
@@ -499,9 +579,9 @@ export default function OrderDetailPage() {
   };
 
 
-  if (loading) {
+  if (loading || sessionStatus === "loading") {
     return (
-      <div className="space-y-4">
+      <div className="max-w-2xl mx-auto space-y-4">
         <div className="h-8 w-32 bg-gray-200 rounded animate-pulse" />
         <div className="h-48 bg-gray-200 rounded-xl animate-pulse" />
         <div className="h-32 bg-gray-200 rounded-xl animate-pulse" />
@@ -520,10 +600,7 @@ export default function OrderDetailPage() {
     );
   }
 
-  const details =
-    typeof order.productDetails === "string"
-      ? JSON.parse(order.productDetails)
-      : order.productDetails;
+  const details = safeParseJSON(order?.productDetails);
 
   const formattedId =
     typeof order.orderId === "number"
@@ -539,9 +616,9 @@ export default function OrderDetailPage() {
     notes: log.notes,
   }));
 
-  const stages = order.productionStages
-    ? JSON.parse(order.productionStages)
-    : { printing: false, coating: false, slitting: false };
+  const stages = (() => {
+    try { return order.productionStages ? JSON.parse(order.productionStages) : {}; } catch { return {}; }
+  })();
 
   const showStages = ["IN_PRODUCTION", "READY_FOR_DISPATCH", "DISPATCHED"].includes(order.status);
 
@@ -599,6 +676,15 @@ export default function OrderDetailPage() {
           <Share2 className="w-3.5 h-3.5" />
           Share PDF
         </Link>
+        {canPrintLabel && (order.items?.some((i: any) => i.productCategory === "BOPP_TAPE") || order.productCategory === "BOPP_TAPE") && (
+          <button
+            onClick={() => setShowLabelModal(true)}
+            className="flex items-center gap-1.5 px-3 py-2 bg-purple-50 border border-purple-200 rounded-lg text-xs font-medium text-purple-700 hover:bg-purple-100 transition-colors"
+          >
+            <Tag className="w-3.5 h-3.5" />
+            Print Label
+          </button>
+        )}
         {canEditOrder && (
           <Link
             href={`/orders/${id}/edit`}
@@ -722,15 +808,44 @@ export default function OrderDetailPage() {
         <h2 className="text-sm font-semibold text-gray-900 mb-3">
           {t("orderDetail.orderItems")} ({orderItems.length})
         </h2>
+
+        {/* Fallback for legacy single-product orders (no items) */}
+        {orderItems.length === 0 && order.productCategory && (
+          <div className="bg-gray-50 rounded-xl border border-gray-200 overflow-hidden">
+            <div className="px-4 py-3 bg-white border-b border-gray-100 flex items-center justify-between">
+              <span className="text-sm font-semibold text-gray-900">
+                {getProductCategoryLabel(order.productCategory)}
+              </span>
+              <StatusBadge status={order.status || "ORDER_PLACED"} />
+            </div>
+            <div className="p-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+              {Object.entries(details as Record<string, any>).map(([key, value]) => {
+                if (!value) return null;
+                const label = key.replace(/([A-Z])/g, " $1").replace(/^./, s => s.toUpperCase());
+                return (
+                  <div key={key} className="text-xs">
+                    <span className="text-gray-500 block mb-0.5">{label}</span>
+                    <span className="text-gray-900 font-medium">{String(value)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         <div className="space-y-4">
           {orderItems.map((item: any, idx: number) => {
-            const itemDetails = typeof item.productDetails === "string"
-              ? JSON.parse(item.productDetails)
+            let itemDetails = typeof item.productDetails === "string"
+              ? (() => { try { return JSON.parse(item.productDetails); } catch { return {}; } })()
               : item.productDetails || {};
+            // Fallback: if item has no details of its own, use order-level details (legacy compat)
+            if (Object.keys(itemDetails).length === 0 && orderItems.length === 1) {
+              itemDetails = details;
+            }
             
-            const itemStages = item.productionStages
-              ? JSON.parse(item.productionStages)
-              : { printing: false, coating: false, slitting: false };
+            const itemStages = (() => {
+              try { return item.productionStages ? JSON.parse(item.productionStages) : {}; } catch { return {}; }
+            })();
 
             const isPrintedBopp =
               item.productCategory === "BOPP_TAPE" &&
@@ -855,7 +970,7 @@ export default function OrderDetailPage() {
                       {/* Continue to Production — shown only when item is RAW_MATERIAL_NA */}
                       {item.status === "RAW_MATERIAL_NA" && ["ADMIN", "PRODUCTION", "ACCOUNTANT"].includes(userRole) && (
                         <button
-                          onClick={() => handleItemStatusUpdate(item.id, "IN_PRODUCTION")}
+                          onClick={() => confirmItemStatusUpdate(item.id, "IN_PRODUCTION")}
                           disabled={updatingStatus !== null}
                           className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border-2 transition-all disabled:opacity-40 active:scale-95 border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-500 hover:text-white hover:border-amber-500"
                         >
@@ -881,7 +996,7 @@ export default function OrderDetailPage() {
                         return (
                           <button
                             key={btn.status}
-                            onClick={() => !isBlocked && handleItemStatusUpdate(item.id, btn.status)}
+                            onClick={() => !isBlocked && confirmItemStatusUpdate(item.id, btn.status)}
                             disabled={updatingStatus !== null || isBlocked}
                             title={isBlocked ? t("orderDetail.resolveRawMaterial") : undefined}
                             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border-2 transition-all disabled:opacity-40 active:scale-95 ${btn.style}`}
@@ -1013,38 +1128,70 @@ export default function OrderDetailPage() {
             );
           })()}
 
-          {/* Extra Rolls for BOPP Tape (editable by production supervisor) */}
+          {/* Extra Boxes & Extra Rolls for BOPP Tape (editable by production supervisor) */}
           {canEditStages && (() => {
             const boppItems = orderItems.filter((item: any) => item.productCategory === "BOPP_TAPE");
             if (boppItems.length === 0) return null;
             return (
-              <div className="space-y-3">
-                <p className="text-xs font-medium text-gray-600">Extra Rolls (BOPP Tape)</p>
-                <p className="text-xs text-gray-400 -mt-2">Rolls produced extra — will appear on challan</p>
-                {boppItems.map((item: any) => (
-                  <div key={item.id}>
-                    <label className="block text-xs text-gray-500 mb-1">
-                      Item {orderItems.indexOf(item) + 1} — {getProductCategoryLabel(item.productCategory)}
-                    </label>
-                    <div className="flex gap-2">
-                      <input
-                        type="number"
-                        value={itemExtraRolls[item.id] ?? ""}
-                        onChange={(e) => setItemExtraRolls((prev) => ({ ...prev, [item.id]: e.target.value }))}
-                        placeholder="0 extra rolls"
-                        className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                      />
-                      <button
-                        onClick={() => handleItemExtraRollsSave(item.id)}
-                        disabled={saving}
-                        className="px-3 py-2 bg-brand-500 text-white text-xs rounded-lg hover:bg-brand-600 disabled:opacity-50"
-                      >
-                        <Save className="w-3.5 h-3.5" />
-                      </button>
+              <>
+                {/* Extra Boxes */}
+                <div className="space-y-3">
+                  <p className="text-xs font-medium text-gray-600">Extra Boxes (BOPP Tape)</p>
+                  <p className="text-xs text-gray-400 -mt-2">Boxes produced extra — will appear on challan</p>
+                  {boppItems.map((item: any) => (
+                    <div key={item.id}>
+                      <label className="block text-xs text-gray-500 mb-1">
+                        Item {orderItems.indexOf(item) + 1} — {getProductCategoryLabel(item.productCategory)}
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          type="number"
+                          value={itemExtraBoxes[item.id] ?? ""}
+                          onChange={(e) => setItemExtraBoxes((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                          placeholder="0 extra boxes"
+                          className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                        />
+                        <button
+                          onClick={() => handleItemExtraBoxesSave(item.id)}
+                          disabled={saving}
+                          className="px-3 py-2 bg-brand-500 text-white text-xs rounded-lg hover:bg-brand-600 disabled:opacity-50"
+                        >
+                          <Save className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+
+                {/* Extra Rolls */}
+                <div className="space-y-3">
+                  <p className="text-xs font-medium text-gray-600">Extra Rolls (BOPP Tape)</p>
+                  <p className="text-xs text-gray-400 -mt-2">Rolls produced extra — will appear on challan</p>
+                  {boppItems.map((item: any) => (
+                    <div key={item.id}>
+                      <label className="block text-xs text-gray-500 mb-1">
+                        Item {orderItems.indexOf(item) + 1} — {getProductCategoryLabel(item.productCategory)}
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          type="number"
+                          value={itemExtraRolls[item.id] ?? ""}
+                          onChange={(e) => setItemExtraRolls((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                          placeholder="0 extra rolls"
+                          className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                        />
+                        <button
+                          onClick={() => handleItemExtraRollsSave(item.id)}
+                          disabled={saving}
+                          className="px-3 py-2 bg-brand-500 text-white text-xs rounded-lg hover:bg-brand-600 disabled:opacity-50"
+                        >
+                          <Save className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
             );
           })()}
 
@@ -1226,6 +1373,11 @@ export default function OrderDetailPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Print Label Modal */}
+      {showLabelModal && order && (
+        <OrderLabelModal order={order} onClose={() => setShowLabelModal(false)} />
       )}
 
       {/* Raw Material N/A Modal */}

@@ -32,6 +32,9 @@ export async function GET(request: NextRequest) {
         { items: { some: { status: "RAW_MATERIAL_NA" } } },
       ],
     });
+  } else if (status === "not_dispatched") {
+    // For Production Queue / Activity Log filters
+    andConditions.push({ status: { not: "DISPATCHED" } });
   } else if (status) {
     andConditions.push({ status });
   }
@@ -60,7 +63,7 @@ export async function GET(request: NextRequest) {
   const orders = await prisma.order.findMany({
     where,
     include: {
-      ...(userRole !== "PRODUCTION" && { customer: true }),
+      customer: true, // Always include customer to avoid breaking frontend logic
       items: includeItemNotes
         ? {
             include: {
@@ -78,7 +81,15 @@ export async function GET(request: NextRequest) {
   });
 
   if (userRole === "PRODUCTION") {
-    return NextResponse.json(orders.map((o) => ({ ...o, customer: null })));
+    // For PRODUCTION, obfuscate customer name if not ready for dispatch or dispatched
+    return NextResponse.json(orders.map((o) => {
+      const isPublic = ["READY_FOR_DISPATCH", "DISPATCHED"].includes(o.status);
+      if (isPublic) return o;
+      return {
+        ...o,
+        customer: o.customer ? { ...o.customer, partyName: "Restricted" } : null
+      };
+    }));
   }
 
   return NextResponse.json(orders);

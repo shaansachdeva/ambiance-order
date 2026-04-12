@@ -23,7 +23,7 @@ interface DispatchedOrder {
 type TabFilter = "READY_FOR_DISPATCH" | "DISPATCHED";
 
 export default function DispatchedOrdersPage() {
-  const { data: session } = useSession();
+  const { data: session, status: sessionStatus } = useSession();
   const [orders, setOrders] = useState<DispatchedOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -31,7 +31,8 @@ export default function DispatchedOrdersPage() {
 
   const { t } = useLanguage();
   const userRole = ((session?.user as any)?.role || "SALES") as UserRole;
-  const showParty = hasPermission(userRole, "view_party");
+  const customPermissions = (session?.user as any)?.customPermissions ?? null;
+  const showParty = hasPermission(userRole, "view_party", customPermissions);
 
   const fetchOrders = useCallback(() => {
     setLoading(true);
@@ -129,7 +130,7 @@ export default function DispatchedOrdersPage() {
       </div>
 
       {/* Loading */}
-      {loading ? (
+      {loading || sessionStatus === "loading" ? (
         <div className="space-y-3">
           {[...Array(5)].map((_, i) => (
             <div key={i} className="h-20 bg-gray-100 rounded-xl animate-pulse" />

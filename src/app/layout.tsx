@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import SessionProvider from "@/components/SessionProvider";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import "./globals.css";
@@ -21,15 +23,21 @@ export const viewport: Viewport = {
   maximumScale: 1,
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Pre-fetch session server-side so the client never starts from null.
+  // This eliminates the "loading flash" where role defaults to SALES for a split second.
+  const session = await getServerSession(authOptions);
+
   return (
     <html lang="en">
       <body className={`${inter.variable} font-sans antialiased`}>
-        <SessionProvider session={null}>
+        {/* refetchOnWindowFocus ensures permissions saved by admin take effect
+            the next time the affected user brings the tab into focus */}
+        <SessionProvider session={session} refetchOnWindowFocus refetchInterval={300}>
           <LanguageProvider>{children}</LanguageProvider>
         </SessionProvider>
       </body>

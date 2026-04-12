@@ -56,6 +56,7 @@ export default function NewLeadPage() {
   const { t } = useLanguage();
   const [submitting, setSubmitting] = useState(false);
   const [companyName, setCompanyName] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, boolean>>({});
   const [remarks, setRemarks] = useState("");
   const [nextFollowUp, setNextFollowUp] = useState("");
   const [contacts, setContacts] = useState<LeadContactData[]>([newContact()]);
@@ -131,8 +132,11 @@ export default function NewLeadPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!companyName) {
-      toast.error("Company name is required");
+    const newErrors: Record<string, boolean> = {};
+    if (!companyName.trim()) newErrors.companyName = true;
+    if (Object.keys(newErrors).length > 0) {
+      setFieldErrors(newErrors);
+      toast.error("Please fill in the highlighted required fields");
       return;
     }
 
@@ -211,15 +215,26 @@ export default function NewLeadPage() {
         <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-6 shadow-sm">
           <h2 className="text-lg font-semibold text-gray-900 mb-2">{t("leads.basicInfo")}</h2>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">{t("leads.companyName")}</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              {t("leads.companyName")}
+              <span className="text-red-500 ml-1">*</span>
+            </label>
             <input
               type="text"
-              required
               value={companyName}
-              onChange={(e) => setCompanyName(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+              onChange={(e) => { setCompanyName(e.target.value); if (e.target.value.trim()) setFieldErrors(p => ({ ...p, companyName: false })); }}
+              className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 ${
+                fieldErrors.companyName
+                  ? "border-red-400 bg-red-50 focus:ring-red-400 focus:border-red-400"
+                  : "border-gray-300 focus:ring-brand-500"
+              }`}
               placeholder="e.g. Acme Corp"
             />
+            {fieldErrors.companyName && (
+              <p className="mt-1 text-xs text-red-600 flex items-center gap-1">
+                <AlertCircle className="w-3 h-3" /> Company name is required
+              </p>
+            )}
           </div>
 
           <div className="space-y-3">

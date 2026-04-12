@@ -1,6 +1,27 @@
 import { ROLE_PERMISSIONS, UserRole } from "@/types";
 
-export function hasPermission(role: UserRole, permission: string): boolean {
+export function hasPermission(
+  role: UserRole,
+  permission: string,
+  customPermissions: string[] | null = null
+): boolean {
+  // If custom permissions are set, they override role-based permissions
+  // Mapping of action permissions to feature keys for custom permission check
+  const actionToFeature: Record<string, string> = {
+    "create_order": "nav.newOrder",
+    "view_order": "nav.orders",
+    "update_status": "nav.production",
+    "view_party": "nav.parties",
+    "manage_users": "nav.settings",
+    "view_dashboard": "nav.dashboard",
+    "view_reports": "nav.reports",
+  };
+
+  const featureKey = actionToFeature[permission];
+  if (customPermissions !== null && featureKey) {
+    return customPermissions.includes(featureKey);
+  }
+
   return ROLE_PERMISSIONS[role]?.includes(permission) ?? false;
 }
 

@@ -4,8 +4,7 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import DashboardStats from "@/components/DashboardStats";
 import OrderCard from "@/components/OrderCard";
-import { formatDate } from "@/lib/utils";
-import { hasPermission } from "@/lib/utils";
+import { formatDate, hasPermission, safeParseJSON } from "@/lib/utils";
 import { useLanguage } from "@/contexts/LanguageContext";
 import type { UserRole } from "@/types";
 import { AlertTriangle, TrendingUp, Columns3, ArrowRight } from "lucide-react";
@@ -24,13 +23,14 @@ interface DashboardData {
 }
 
 export default function DashboardPage() {
-  const { data: session } = useSession();
+  const { data: session, status: sessionStatus } = useSession();
   const { t, tProduct } = useLanguage();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
 
   const userRole = ((session?.user as any)?.role || "SALES") as UserRole;
-  const showParty = hasPermission(userRole, "view_party");
+  const customPermissions = (session?.user as any)?.customPermissions ?? null;
+  const showParty = hasPermission(userRole, "view_party", customPermissions);
 
   useEffect(() => {
     fetch("/api/dashboard")
@@ -42,7 +42,7 @@ export default function DashboardPage() {
       .catch(() => setLoading(false));
   }, []);
 
-  if (loading) {
+  if (loading || sessionStatus === "loading") {
     return (
       <div className="space-y-6">
         <div className="h-8 w-48 bg-gray-200 rounded animate-pulse" />
@@ -139,10 +139,7 @@ export default function DashboardPage() {
                   orderId: order.orderId,
                   productCategory: order.productCategory,
                   status: order.status,
-                  productDetails:
-                    typeof order.productDetails === "string"
-                      ? JSON.parse(order.productDetails)
-                      : order.productDetails,
+                  productDetails: safeParseJSON(order.productDetails),
                   partyName: order.customer?.partyName,
                   createdAt: order.createdAt,
                 }}
@@ -172,10 +169,7 @@ export default function DashboardPage() {
                   orderId: order.orderId,
                   productCategory: order.productCategory,
                   status: order.status,
-                  productDetails:
-                    typeof order.productDetails === "string"
-                      ? JSON.parse(order.productDetails)
-                      : order.productDetails,
+                  productDetails: safeParseJSON(order.productDetails),
                   partyName: order.customer?.partyName,
                   createdAt: order.createdAt,
                 }}

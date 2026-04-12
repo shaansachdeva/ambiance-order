@@ -6,7 +6,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { USER_ROLES, USER_FEATURES } from "@/types";
 import type { UserRole } from "@/types";
 import toast, { Toaster } from "react-hot-toast";
-import { Settings, UserPlus, Shield, X, Eye, EyeOff, Lock, Pencil, Trash2, SlidersHorizontal, RotateCcw } from "lucide-react";
+import { Settings, UserPlus, Shield, X, Eye, EyeOff, Lock, Pencil, Trash2, SlidersHorizontal, RotateCcw, Tag, Plus } from "lucide-react";
 
 interface UserItem {
   id: string;
@@ -57,9 +57,68 @@ export default function SettingsPage() {
   const [permSelected, setPermSelected] = useState<Set<string>>(new Set());
   const [savingPerms, setSavingPerms] = useState(false);
 
+  // Custom product categories
+  const [customCategories, setCustomCategories] = useState<any[]>([]);
+  const [newCatName, setNewCatName] = useState("");
+  const [newCatFields, setNewCatFields] = useState<string[]>(["Type", "Size", "Quantity"]);
+  const [showCatForm, setShowCatForm] = useState(false);
+  const [addingCat, setAddingCat] = useState(false);
+  const [newFieldInput, setNewFieldInput] = useState("");
+
   const userRole = ((session?.user as any)?.role || "SALES") as UserRole;
   const userId = (session?.user as any)?.id;
   const isAdmin = userRole === "ADMIN";
+
+  // Load custom product categories for everyone (they're used in orders too)
+  useEffect(() => {
+    fetch("/api/product-categories")
+      .then((r) => r.json())
+      .then((d) => setCustomCategories(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  }, []);
+
+  const handleAddCategory = async () => {
+    if (!newCatName.trim()) { toast.error("Enter a category name"); return; }
+    setAddingCat(true);
+    try {
+      const res = await fetch("/api/product-categories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newCatName.trim(), fields: newCatFields }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setCustomCategories((prev) => [...prev, data]);
+        setNewCatName("");
+        setNewCatFields(["Type", "Size", "Quantity"]);
+        setShowCatForm(false);
+        toast.success(`Category "${data.name}" added`);
+      } else {
+        toast.error(data.error || "Failed to add category");
+      }
+    } catch { toast.error("Something went wrong"); }
+    finally { setAddingCat(false); }
+  };
+
+  const handleToggleCat = async (cat: any) => {
+    const res = await fetch("/api/product-categories", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: cat.id, active: !cat.active }),
+    });
+    if (res.ok) {
+      setCustomCategories((prev) => prev.map((c) => c.id === cat.id ? { ...c, active: !c.active } : c));
+    }
+  };
+
+  const handleDeleteCat = async (cat: any) => {
+    if (!confirm(`Delete category "${cat.name}"?`)) return;
+    const res = await fetch(`/api/product-categories?id=${cat.id}`, { method: "DELETE" });
+    if (res.ok) {
+      setCustomCategories((prev) => prev.filter((c) => c.id !== cat.id));
+      toast.success("Category deleted");
+    }
+  };
 
   useEffect(() => {
     // Wait for session to resolve before deciding — avoids premature loading=false
@@ -85,6 +144,16 @@ export default function SettingsPage() {
         setLoading(false);
       });
   }, [isAdmin, sessionStatus]);
+
+  if (sessionStatus === "loading") {
+    return (
+      <div className="max-w-2xl mx-auto space-y-6">
+        <div className="h-8 w-48 bg-gray-200 rounded animate-pulse" />
+        <div className="h-32 bg-gray-200 rounded-xl animate-pulse" />
+        <div className="h-64 bg-gray-200 rounded-xl animate-pulse" />
+      </div>
+    );
+  }
 
   const togglePasswordVisibility = (userId: string) => {
     setVisiblePasswords((prev) => {
@@ -818,10 +887,136 @@ export default function SettingsPage() {
       )}
 
       {/* Non-admin: Access Denied for user management */}
-      {!isAdmin && (
+      {sessionStatus === "authenticated" && !isAdmin && (
         <div className="text-center py-8">
           <Shield className="w-10 h-10 text-gray-300 mx-auto mb-2" />
           <p className="text-sm text-gray-400">User management is admin-only.</p>
+        </div>
+      )}
+
+      {/* Custom Product Categories — admin only */}
+      {isAdmin && (
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-1.5">
+              <Tag className="w-4 h-4 text-brand-500" />
+              Custom Product Categories
+            </h2>
+            <button
+              onClick={() => setShowCatForm(!showCatForm)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors"
+            >
+              {showCatForm ? <><X className="w-3.5 h-3.5" /> Cancel</> : <><Plus className="w-3.5 h-3.5" /> Add Category</>}
+            </button>
+          </div>
+
+          {/* Built-in categories notice */}
+          <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 mb-3">
+            <p className="text-xs text-gray-500 font-medium mb-1">Built-in categories (always available):</p>
+            <div className="flex flex-wrap gap-1.5">
+              {["BOPP Tape", "BOPP Jumbo", "Thermal Paper Roll", "Barcode Label", "Computer Stationery"].map((name) => (
+                <span key={name} className="text-xs bg-white border border-gray-200 text-gray-600 px-2 py-0.5 rounded-full">{name}</span>
+              ))}
+            </div>
+          </div>
+
+          {/* Add new category form */}
+          {showCatForm && (
+            <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4 space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Category Name</label>
+                <input
+                  type="text"
+                  value={newCatName}
+                  onChange={(e) => setNewCatName(e.target.value)}
+                  placeholder="e.g. Kraft Tape, Foam Tape, Stretch Film"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Data Entry Fields</label>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {newCatFields.map((field, idx) => (
+                    <span key={idx} className="inline-flex items-center gap-1 text-xs bg-brand-50 border border-brand-200 text-brand-700 px-2 py-0.5 rounded-full">
+                      {field}
+                      <button type="button" onClick={() => setNewCatFields((prev) => prev.filter((_, i) => i !== idx))} className="ml-0.5 text-brand-400 hover:text-red-500">
+                        <X className="w-2.5 h-2.5" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newFieldInput}
+                    onChange={(e) => setNewFieldInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && newFieldInput.trim()) {
+                        e.preventDefault();
+                        setNewCatFields((prev) => [...prev, newFieldInput.trim()]);
+                        setNewFieldInput("");
+                      }
+                    }}
+                    placeholder="Add a field (press Enter)"
+                    className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => { if (newFieldInput.trim()) { setNewCatFields((prev) => [...prev, newFieldInput.trim()]); setNewFieldInput(""); } }}
+                    className="px-3 py-2 bg-gray-100 text-gray-700 text-sm rounded-lg hover:bg-gray-200"
+                  >
+                    Add
+                  </button>
+                </div>
+                <p className="text-[10px] text-gray-400 mt-1">These will be the input fields when adding an order/quotation item of this type.</p>
+              </div>
+              <button
+                onClick={handleAddCategory}
+                disabled={addingCat}
+                className="w-full py-2.5 bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
+              >
+                {addingCat ? "Adding..." : "Add Category"}
+              </button>
+            </div>
+          )}
+
+          {/* Custom categories list */}
+          {customCategories.length === 0 ? (
+            <div className="bg-white border border-gray-200 rounded-xl p-4 text-center text-xs text-gray-400">
+              No custom categories yet. Add one above to expand product options.
+            </div>
+          ) : (
+            <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
+              {customCategories.map((cat) => {
+                let fields: string[] = [];
+                try { fields = JSON.parse(cat.fields); } catch {}
+                return (
+                  <div key={cat.id} className={`p-3 ${!cat.active ? "opacity-50" : ""}`}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-gray-900">{cat.name}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">Fields: {fields.join(", ") || "none"}</p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={() => handleToggleCat(cat)}
+                          className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${cat.active ? "bg-red-50 text-red-600 hover:bg-red-100" : "bg-green-50 text-green-600 hover:bg-green-100"}`}
+                        >
+                          {cat.active ? "Deactivate" : "Activate"}
+                        </button>
+                        <button
+                          onClick={() => handleDeleteCat(cat)}
+                          className="p-1.5 text-gray-400 hover:text-red-600 rounded-lg hover:bg-red-50"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
     </div>

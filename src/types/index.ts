@@ -128,6 +128,9 @@ export interface UserFeature {
 export const USER_FEATURES: UserFeature[] = [
   { key: "nav.orders",       label: "View Orders",             group: "Orders" },
   { key: "nav.newOrder",     label: "Create New Orders",       group: "Orders" },
+  { key: "nav.quotations",   label: "Quotations",              group: "Orders" },
+  { key: "nav.drafts",       label: "Drafts",                  group: "Orders" },
+  { key: "nav.products",     label: "Products",                group: "Admin" },
   { key: "nav.calendar",     label: "Calendar",                group: "General" },
   { key: "nav.parties",      label: "Parties / Customers",     group: "General" },
   { key: "nav.inventory",    label: "Inventory",               group: "General" },

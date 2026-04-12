@@ -26,6 +26,20 @@ export async function PATCH(
       return NextResponse.json({ error: "Status is required" }, { status: 400 });
     }
 
+    // Get current order - support both CUID and human-readable orderId
+    const currentOrder = await prisma.order.findFirst({
+      where: {
+        OR: [{ id: params.id }, { orderId: params.id }],
+        deletedAt: null,
+      },
+    });
+
+    if (!currentOrder) {
+      return NextResponse.json({ error: "Order not found" }, { status: 404 });
+    }
+
+    const orderId = currentOrder.id;
+
     // Validate role-based status transitions
     if (userRole === "ADMIN") {
       // ADMIN can change to any status - no restriction
@@ -53,7 +67,7 @@ export async function PATCH(
     // Block progression if any item has raw material issue
     if (status === "READY_FOR_DISPATCH" || status === "DISPATCHED") {
       const items = await prisma.orderItem.findMany({
-        where: { orderId: params.id },
+        where: { orderId: orderId },
         select: { status: true },
       });
       if (items.some((item) => item.status === "RAW_MATERIAL_NA")) {
@@ -64,19 +78,10 @@ export async function PATCH(
       }
     }
 
-    // Get current order
-    const currentOrder = await prisma.order.findUnique({
-      where: { id: params.id },
-    });
-
-    if (!currentOrder) {
-      return NextResponse.json({ error: "Order not found" }, { status: 404 });
-    }
-
     // Update order status, cascade to all items, and create log — all in one transaction
     const updatedOrder = await prisma.$transaction(async (tx) => {
       const updated = await tx.order.update({
-        where: { id: params.id },
+        where: { id: orderId },
         data: { status },
         include: {
           customer: true,
@@ -98,13 +103,13 @@ export async function PATCH(
 
       // Cascade status to all items in this order
       await tx.orderItem.updateMany({
-        where: { orderId: params.id },
+        where: { orderId: orderId },
         data: { status },
       });
 
       await tx.orderStatusLog.create({
         data: {
-          orderId: params.id,
+          orderId: orderId,
           fromStatus: currentOrder.status,
           toStatus: status,
           notes: notes || null,

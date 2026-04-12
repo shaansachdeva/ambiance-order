@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { formatDate } from "@/lib/utils";
+import { formatDate, safeParseJSON } from "@/lib/utils";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { ArrowLeft, Printer } from "lucide-react";
 import Link from "next/link";
@@ -164,10 +164,7 @@ export default function ChallanPage() {
             <tbody>
               {orderItems.length > 0 ? (
                 orderItems.map((item: any, idx: number) => {
-                  const itemDetails =
-                    typeof item.productDetails === "string"
-                      ? JSON.parse(item.productDetails)
-                      : item.productDetails || {};
+                  const itemDetails = safeParseJSON(item.productDetails);
                   // Build spec string, excluding boxes/quantity/extraRolls (shown in Qty column)
                   const skipKeys = new Set(["boxes", "quantity", "packets", "extraRolls", "jumboCode"]);
                   const specStr = Object.entries(itemDetails)
@@ -192,10 +189,7 @@ export default function ChallanPage() {
                   </td>
                   <td className="border border-gray-400 px-1.5 py-1.5 text-gray-600">
                     {(() => {
-                      const d =
-                        typeof order.productDetails === "string"
-                          ? JSON.parse(order.productDetails)
-                          : order.productDetails || {};
+                      const d = safeParseJSON(order.productDetails);
                       const skipKeys = new Set(["boxes", "quantity", "packets", "extraRolls", "jumboCode"]);
                       return Object.entries(d)
                         .filter(([k, v]) => v && !skipKeys.has(k))
@@ -204,13 +198,7 @@ export default function ChallanPage() {
                     })()}
                   </td>
                   <td className="border border-gray-400 px-1.5 py-1.5 text-center text-black font-medium">
-                    {(() => {
-                      const d =
-                        typeof order.productDetails === "string"
-                          ? JSON.parse(order.productDetails)
-                          : order.productDetails || {};
-                      return getItemQuantity(order.productCategory, d);
-                    })()}
+                    {getItemQuantity(order.productCategory, safeParseJSON(order.productDetails))}
                   </td>
                 </tr>
               )}

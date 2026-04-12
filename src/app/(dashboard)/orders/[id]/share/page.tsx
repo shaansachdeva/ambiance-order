@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Download, Loader2, Printer } from "lucide-react";
-import { formatDate, getProductCategoryLabel } from "@/lib/utils";
+import { formatDate, getProductCategoryLabel, safeParseJSON } from "@/lib/utils";
 import toast, { Toaster } from "react-hot-toast";
 
 const QUANTITY_KEY: Record<string, string> = {
@@ -65,6 +65,10 @@ export default function OrderSharePage() {
       backgroundColor: "#ffffff",
       logging: false,
       removeContainer: true,
+      // Prevent scroll position from shifting the captured content
+      scrollX: 0,
+      scrollY: -window.scrollY,
+      windowWidth: document.documentElement.scrollWidth,
     });
 
     const imgData = canvas.toDataURL("image/png");
@@ -73,10 +77,16 @@ export default function OrderSharePage() {
     const pageH   = pdf.internal.pageSize.getHeight();
     const imgH    = (canvas.height * pageW) / canvas.width;
 
+    // Always start from top of page — vertical centering pushed content toward bottom
+    const yOffset = 0;
+
     let yPos = 0, remaining = imgH;
     while (remaining > 0) {
       if (yPos > 0) pdf.addPage();
-      pdf.addImage(imgData, "PNG", 0, -yPos, pageW, imgH);
+      // On the first page, we apply yOffset if it's shorter than pageH
+      // On subsequent pages, we always start from the top (-yPos)
+      const currentY = yPos === 0 ? yOffset : -yPos;
+      pdf.addImage(imgData, "PNG", 0, currentY, pageW, imgH);
       yPos += pageH;
       remaining -= pageH;
     }
@@ -258,12 +268,12 @@ const handleDownload = async () => {
             fontSize: 9.5, fontWeight: 600,
             textTransform: "uppercase" as const, letterSpacing: 0.5,
           }}>
-            <div>#</div>
-            <div>Product</div>
-            <div>Specifications</div>
-            <div style={{ textAlign: "center" }}>Qty</div>
-            {hasRate && <div style={{ textAlign: "right" }}>Price</div>}
-            {hasGst  && <div style={{ textAlign: "right" }}>GST %</div>}
+            <div style={{ width: "100%" }}>#</div>
+            <div style={{ width: "100%" }}>Product</div>
+            <div style={{ width: "100%" }}>Specifications</div>
+            <div style={{ textAlign: "center", width: "100%" }}>Qty</div>
+            {hasRate && <div style={{ textAlign: "right", width: "100%" }}>Price</div>}
+            {hasGst  && <div style={{ textAlign: "right", width: "100%" }}>GST %</div>}
           </div>
 
           {/* Table rows */}
@@ -271,8 +281,8 @@ const handleDownload = async () => {
             const isLegacy = item._legacy;
             const category = isLegacy ? order.productCategory : item.productCategory;
             const d: Record<string, string> = isLegacy
-              ? (typeof order.productDetails === "string" ? JSON.parse(order.productDetails) : order.productDetails || {})
-              : (typeof item.productDetails === "string" ? JSON.parse(item.productDetails) : item.productDetails || {});
+              ? safeParseJSON(order.productDetails)
+              : safeParseJSON(item.productDetails);
 
             const qty  = extractQuantity(category, d);
             const qKey = QUANTITY_KEY[category] || "";
@@ -313,17 +323,17 @@ const handleDownload = async () => {
                   ))}
                 </div>
 
-                <div style={{ fontSize: 11.5, fontWeight: 600, textAlign: "center", color: "#111827", paddingTop: 1 }}>
+                <div style={{ fontSize: 11.5, fontWeight: 600, textAlign: "center", color: "#111827", paddingTop: 1, width: "100%" }}>
                   {qty || "—"}
                 </div>
 
                 {hasRate && (
-                  <div style={{ fontSize: 11.5, fontWeight: 600, textAlign: "right", color: ACCENT, paddingTop: 1 }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 600, textAlign: "right", color: ACCENT, paddingTop: 1, width: "100%" }}>
                     {item.rate ? `₹${Number(item.rate).toLocaleString("en-IN")}` : "—"}
                   </div>
                 )}
                 {hasGst && (
-                  <div style={{ fontSize: 11.5, fontWeight: 600, textAlign: "right", color: "#374151", paddingTop: 1 }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 600, textAlign: "right", color: "#374151", paddingTop: 1, width: "100%" }}>
                     {item.gst ? `${item.gst}%` : "—"}
                   </div>
                 )}

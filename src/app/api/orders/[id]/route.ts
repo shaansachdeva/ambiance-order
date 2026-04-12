@@ -14,8 +14,53 @@ export async function GET(
 
   const userRole = (session.user as any).role;
 
-  const order = await prisma.order.findFirst({
-    where: { id: params.id, deletedAt: null },
+  const idParam = String(params.id);
+  console.log(`[API] Fetching order with ID param: "${idParam}"`);
+
+  // Search for the order by internal ID (cuid) first
+  let order = await prisma.order.findFirst({
+    where: { id: idParam },
+    include: {
+      customer: true,
+      items: true,
+    }
+  });
+
+  if (order) {
+    console.log(`[API] Found order by cuid: ${order.orderId}, deletedAt: ${order.deletedAt}`);
+    if (order.deletedAt !== null) {
+      console.warn(`[API] Order ${idParam} is soft-deleted`);
+      return NextResponse.json({ error: "This order is in the recycle bin" }, { status: 404 });
+    }
+  } else {
+    // Try by orderId
+    order = await prisma.order.findFirst({
+      where: { orderId: idParam },
+      include: {
+        customer: true,
+        items: true,
+      }
+    });
+    if (order) {
+      console.log(`[API] Found order by orderId: ${order.id}, deletedAt: ${order.deletedAt}`);
+      if (order.deletedAt !== null) {
+        return NextResponse.json({ error: "This order is in the recycle bin" }, { status: 404 });
+      }
+    }
+  }
+
+  if (!order) {
+    console.warn(`[API] Order completely NOT FOUND for param: "${idParam}"`);
+    // Final check: does it exist at all in the DB?
+    const count = await prisma.order.count({ where: { OR: [{id: idParam}, {orderId: idParam}] } });
+    console.log(`[API] Count for this ID in DB: ${count}`);
+    
+    return NextResponse.json({ error: `Order not found (ID: ${idParam})` }, { status: 404 });
+  }
+
+  // If we found it, re-fetch with full includes
+  order = await prisma.order.findUnique({
+    where: { id: order.id },
     include: {
       customer: true,
       items: {
@@ -57,7 +102,8 @@ export async function GET(
   });
 
   if (!order) {
-    return NextResponse.json({ error: "Order not found" }, { status: 404 });
+    console.warn(`Order fetch failed for ID: ${idParam}`);
+    return NextResponse.json({ error: `Order not found (ID: ${idParam})` }, { status: 404 });
   }
 
   if (userRole === "PRODUCTION") {
@@ -76,6 +122,20 @@ export async function PATCH(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Find order first to get internal ID if params.id is the human-readable orderId
+  const existingOrder = await prisma.order.findFirst({
+    where: {
+      OR: [{ id: params.id }, { orderId: params.id }],
+      deletedAt: null,
+    },
+    select: { id: true, status: true },
+  });
+
+  if (!existingOrder) {
+    return NextResponse.json({ error: "Order not found" }, { status: 404 });
+  }
+
+  const orderId = existingOrder.id;
   const userRole = (session.user as any).role as string;
 
   try {
@@ -128,7 +188,7 @@ export async function PATCH(
     if (items && Array.isArray(items) && (userRole === "ADMIN" || userRole === "ACCOUNTANT")) {
       // First update the order's core fields
       await prisma.order.update({
-        where: { id: params.id },
+        where: { id: orderId },
         data: updateData,
       });
 
@@ -140,7 +200,7 @@ export async function PATCH(
         // Delete items that were removed
         await tx.orderItem.deleteMany({
           where: { 
-            orderId: params.id,
+            orderId: orderId,
             id: { notIn: remainingDbIds.length > 0 ? remainingDbIds : ["none"] }
           }
         });
@@ -164,7 +224,7 @@ export async function PATCH(
           } else {
             await tx.orderItem.create({
               data: {
-                orderId: params.id,
+                orderId: orderId,
                 productCategory: item.productCategory,
                 productDetails: productDetailsStr,
                 rate: item.rate || null,
@@ -176,7 +236,7 @@ export async function PATCH(
       });
     } else {
       await prisma.order.update({
-        where: { id: params.id },
+        where: { id: orderId },
         data: updateData,
       });
     }
@@ -184,13 +244,13 @@ export async function PATCH(
     // If status was changed, cascade to all items
     if (updateData.status) {
       await prisma.orderItem.updateMany({
-        where: { orderId: params.id },
+        where: { orderId: orderId },
         data: { status: updateData.status },
       });
     }
 
     const order = await prisma.order.findUnique({
-      where: { id: params.id },
+      where: { id: orderId },
       include: {
         customer: true,
         items: true,
@@ -222,8 +282,20 @@ export async function DELETE(
   }
 
   try {
+    const existingOrder = await prisma.order.findFirst({
+      where: {
+        OR: [{ id: params.id }, { orderId: params.id }],
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+
+    if (!existingOrder) {
+      return NextResponse.json({ error: "Order not found" }, { status: 404 });
+    }
+
     await prisma.order.update({
-      where: { id: params.id },
+      where: { id: existingOrder.id },
       data: { deletedAt: new Date() },
     });
     return NextResponse.json({ success: true });

@@ -44,7 +44,7 @@ interface CalendarLead {
 }
 
 export default function CalendarPage() {
-  const { data: session } = useSession();
+  const { data: session, status: sessionStatus } = useSession();
   const { t, tProduct } = useLanguage();
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth());
@@ -56,10 +56,11 @@ export default function CalendarPage() {
 
   const userRole = ((session?.user as any)?.role || "SALES") as UserRole;
   const userId   = (session?.user as any)?.id as string | undefined;
-  const showParty = hasPermission(userRole, "view_party");
+  const customPermissions = (session?.user as any)?.customPermissions ?? null;
+  const showParty = hasPermission(userRole, "view_party", customPermissions);
 
   useEffect(() => {
-    if (!session) return; // wait for session
+    if (sessionStatus === "loading") return; // wait for session to resolve
     setLoading(true);
 
     // Build orders query — SALES sees only their own orders, PRODUCTION sees all orders
@@ -149,8 +150,11 @@ export default function CalendarPage() {
           <button onClick={prevMonth} className="p-2 hover:bg-gray-100 rounded-lg">
             <ChevronLeft className="w-5 h-5 text-gray-600" />
           </button>
-          <h2 className="text-lg font-semibold text-gray-900">
+          <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
             {t(MONTH_KEYS[month])} {year}
+            {loading && (
+              <span className="inline-block w-4 h-4 border-2 border-brand-300 border-t-brand-600 rounded-full animate-spin" />
+            )}
           </h2>
           <button onClick={nextMonth} className="p-2 hover:bg-gray-100 rounded-lg">
             <ChevronRight className="w-5 h-5 text-gray-600" />
@@ -166,97 +170,96 @@ export default function CalendarPage() {
           ))}
         </div>
 
-        {/* Calendar grid */}
-        {loading ? (
-          <div className="h-64 bg-gray-100 rounded-lg animate-pulse" />
-        ) : (
-          <div className="grid grid-cols-7 gap-1">
-            {/* Empty cells for days before the 1st */}
-            {Array.from({ length: firstDay }).map((_, i) => (
-              <div key={`empty-${i}`} className="h-14 md:h-20" />
-            ))}
+        {/* Calendar grid — always visible; loading only hides event dots */}
+        <div className="grid grid-cols-7 gap-1">
+          {/* Empty cells for days before the 1st */}
+          {Array.from({ length: firstDay }).map((_, i) => (
+            <div key={`empty-${i}`} className="h-14 md:h-20" />
+          ))}
 
-            {/* Day cells */}
-            {Array.from({ length: daysInMonth }).map((_, i) => {
-              const day = i + 1;
-              const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-              const dayOrders = ordersByDate[dateStr] || [];
-              const dayLeads = leadsByDate[dateStr] || [];
-              const isToday =
-                day === today.getDate() &&
-                month === today.getMonth() &&
-                year === today.getFullYear();
-              const isPast = new Date(year, month, day) < today;
-              const hasOverdueOrder = dayOrders.some(
-                (o) => isPast && o.status !== "DISPATCHED"
-              );
-              const hasOverdueLead = dayLeads.some((l) => isPast);
-              const hasOverdue = hasOverdueOrder || hasOverdueLead;
-              const isSelected = selectedDate === dateStr;
+          {/* Day cells */}
+          {Array.from({ length: daysInMonth }).map((_, i) => {
+            const day = i + 1;
+            const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+            const dayOrders = loading ? [] : (ordersByDate[dateStr] || []);
+            const dayLeads  = loading ? [] : (leadsByDate[dateStr]  || []);
+            const isToday =
+              day === today.getDate() &&
+              month === today.getMonth() &&
+              year === today.getFullYear();
+            const isPast = new Date(year, month, day) < today;
+            const hasOverdueOrder = dayOrders.some(
+              (o) => isPast && o.status !== "DISPATCHED"
+            );
+            const hasOverdueLead = dayLeads.some((l) => isPast);
+            const hasOverdue = hasOverdueOrder || hasOverdueLead;
+            const isSelected = selectedDate === dateStr;
 
-              const totalItems = dayOrders.length + dayLeads.length;
+            const totalItems = dayOrders.length + dayLeads.length;
 
-              return (
-                <button
-                  key={day}
-                  onClick={() => setSelectedDate(isSelected ? null : dateStr)}
-                  className={`h-14 md:h-20 rounded-lg border text-left p-1 transition-all relative ${
-                    isSelected
-                      ? "border-brand-500 bg-brand-50 ring-2 ring-brand-200"
-                      : isToday
-                      ? "border-brand-300 bg-brand-50/50"
-                      : hasOverdue
-                      ? "border-red-300 bg-red-50/50"
-                      : totalItems > 0
-                      ? "border-gray-200 bg-white hover:border-brand-300"
-                      : "border-transparent hover:bg-gray-50"
+            return (
+              <button
+                key={day}
+                onClick={() => setSelectedDate(isSelected ? null : dateStr)}
+                className={`h-14 md:h-20 rounded-lg border text-left p-1 transition-all relative ${
+                  isSelected
+                    ? "border-brand-500 bg-brand-50 ring-2 ring-brand-200"
+                    : isToday
+                    ? "border-brand-300 bg-brand-50/50"
+                    : hasOverdue
+                    ? "border-red-300 bg-red-50/50"
+                    : totalItems > 0
+                    ? "border-gray-200 bg-white hover:border-brand-300"
+                    : "border-transparent hover:bg-gray-50"
+                }`}
+              >
+                <span
+                  className={`text-xs font-medium ${
+                    isToday
+                      ? "text-brand-600 font-bold"
+                      : isPast
+                      ? "text-gray-400"
+                      : "text-gray-700"
                   }`}
                 >
-                  <span
-                    className={`text-xs font-medium ${
-                      isToday
-                        ? "text-brand-600 font-bold"
-                        : isPast
-                        ? "text-gray-400"
-                        : "text-gray-700"
-                    }`}
-                  >
-                    {day}
-                  </span>
-                  {totalItems > 0 && (
-                    <div className="flex flex-wrap gap-0.5 mt-0.5">
-                      {dayOrders.slice(0, 2).map((o) => {
-                        const isOrderOverdue = isPast && o.status !== "DISPATCHED";
-                        return (
-                          <div
-                            key={o.id}
-                            className={`w-full h-1.5 rounded-full ${
-                              isOrderOverdue
-                                ? "bg-red-400"
-                                : o.priority === "URGENT"
-                                ? "bg-orange-400"
-                                : o.status === "DISPATCHED"
-                                ? "bg-gray-300"
-                                : "bg-brand-400"
-                            }`}
-                          />
-                        );
-                      })}
-                      {dayLeads.slice(0, 3 - Math.min(dayOrders.length, 2)).map((l) => (
-                        <div key={`lead-${l.id}`} className="w-full h-1.5 rounded-full bg-blue-500" />
-                      ))}
-                      {totalItems > 3 && (
-                        <span className="text-[8px] text-gray-400">
-                          +{totalItems - 3}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        )}
+                  {day}
+                </span>
+                {loading ? (
+                  /* Subtle shimmer while events load — doesn't hide the date number */
+                  null
+                ) : totalItems > 0 ? (
+                  <div className="flex flex-wrap gap-0.5 mt-0.5">
+                    {dayOrders.slice(0, 2).map((o) => {
+                      const isOrderOverdue = isPast && o.status !== "DISPATCHED";
+                      return (
+                        <div
+                          key={o.id}
+                          className={`w-full h-1.5 rounded-full ${
+                            isOrderOverdue
+                              ? "bg-red-400"
+                              : o.priority === "URGENT"
+                              ? "bg-orange-400"
+                              : o.status === "DISPATCHED"
+                              ? "bg-gray-300"
+                              : "bg-brand-400"
+                          }`}
+                        />
+                      );
+                    })}
+                    {dayLeads.slice(0, 3 - Math.min(dayOrders.length, 2)).map((l) => (
+                      <div key={`lead-${l.id}`} className="w-full h-1.5 rounded-full bg-blue-500" />
+                    ))}
+                    {totalItems > 3 && (
+                      <span className="text-[8px] text-gray-400">
+                        +{totalItems - 3}
+                      </span>
+                    )}
+                  </div>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Legend */}

@@ -12,12 +12,36 @@ import {
   STATIONERY_TYPES,
   STATIONERY_PARTS,
 } from "@/types";
+import type { CustomField } from "@/lib/customFields";
+import { parseField } from "@/lib/customFields";
+
+/* Evaluate a formula string like "{sizeInches} * 25.4" against current details */
+function evalFormula(formula: string, details: Record<string, string>): string {
+  try {
+    let expr = formula;
+    // Replace {fieldName} with the value (camelCase lookup too)
+    expr = expr.replace(/\{([^}]+)\}/g, (_, name) => {
+      const val = details[name] ?? details[name.replace(/\s+/g, "")] ?? "0";
+      return isNaN(Number(val)) ? "0" : val;
+    });
+    // Safe eval — only allow digits, operators, parens, dots
+    if (/^[0-9+\-*/().\s]+$/.test(expr)) {
+      // eslint-disable-next-line no-eval
+      const result = eval(expr);
+      return isNaN(result) ? "" : String(Math.round(result * 100) / 100);
+    }
+    return "";
+  } catch {
+    return "";
+  }
+}
 
 interface ProductFormProps {
-  productCategory: ProductCategory;
+  productCategory: ProductCategory | string; // also accepts custom category id/name
   productDetails: Record<string, string>;
   onChange: (details: Record<string, string>) => void;
   disabled?: boolean;
+  customFields?: (string | CustomField)[]; // dynamic fields for custom categories
 }
 
 /* ------------------------------------------------------------------ */
@@ -446,6 +470,52 @@ function ComputerStationeryForm({
 }
 
 /* ------------------------------------------------------------------ */
+/*  Custom field form (formula-aware)                                  */
+/* ------------------------------------------------------------------ */
+
+function CustomFieldForm({
+  fields,
+  details,
+  update,
+  disabled,
+}: {
+  fields: CustomField[];
+  details: Record<string, string>;
+  update: (key: string, value: string) => void;
+  disabled: boolean;
+}) {
+  // Evaluate all formula fields whenever details change
+  useEffect(() => {
+    for (const field of fields) {
+      if (field.type === "formula" && field.formula) {
+        const computed = evalFormula(field.formula, details);
+        if (computed !== (details[field.name] ?? "")) {
+          update(field.name, computed);
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fields, ...fields.filter(f => f.type !== "formula").map(f => details[f.name])]);
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      {fields.map((field) => (
+        <InputField
+          key={field.name}
+          label={field.name}
+          value={details[field.name] || ""}
+          onChange={(v) => update(field.name, v)}
+          disabled={disabled}
+          type={field.type === "number" ? "number" : "text"}
+          readOnly={field.type === "formula"}
+          placeholder={field.type === "formula" ? "Auto-calculated" : `Enter ${field.name.toLowerCase()}`}
+        />
+      ))}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Main ProductForm component                                         */
 /* ------------------------------------------------------------------ */
 
@@ -454,6 +524,7 @@ export default function ProductForm({
   productDetails,
   onChange,
   disabled = false,
+  customFields,
 }: ProductFormProps) {
   function update(key: string, value: string) {
     onChange({ ...productDetails, [key]: value });
@@ -481,9 +552,24 @@ export default function ProductForm({
     case "COMPUTER_STATIONERY":
       return <ComputerStationeryForm {...formProps} />;
     default:
+      // Custom / unknown category — render generic fields
+      if (customFields && customFields.length > 0) {
+        const richFields = customFields.map(parseField);
+        return (
+          <CustomFieldForm
+            fields={richFields}
+            details={productDetails}
+            update={update}
+            disabled={disabled}
+          />
+        );
+      }
       return (
-        <div className="text-sm text-red-500 py-4">
-          Unknown product category: {productCategory}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <InputField label="Type" value={productDetails.type || ""} onChange={(v) => update("type", v)} disabled={disabled} />
+          <InputField label="Size" value={productDetails.size || ""} onChange={(v) => update("size", v)} disabled={disabled} />
+          <InputField label="Quantity" value={productDetails.quantity || ""} onChange={(v) => update("quantity", v)} disabled={disabled} type="number" />
+          <InputField label="Remarks" value={productDetails.remarks || ""} onChange={(v) => update("remarks", v)} disabled={disabled} optional />
         </div>
       );
   }

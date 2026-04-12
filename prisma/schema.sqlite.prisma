@@ -27,6 +27,7 @@ model User {
   leads             Lead[]               @relation("UserLeads")
   leadFollowUps     LeadFollowUp[]       @relation("UserLeadFollowUps")
   itemStatusChanges OrderItemStatusLog[] @relation("ItemChangedBy")
+  quotations        Quotation[]          @relation("QuotationCreatedBy")
 }
 
 model Customer {
@@ -37,7 +38,8 @@ model Customer {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  orders Order[]
+  orders     Order[]
+  quotations Quotation[]
 }
 
 model Order {
@@ -223,4 +225,51 @@ model LeadFollowUp {
   user      User     @relation("UserLeadFollowUps", fields: [userId], references: [id], onDelete: Cascade)
   notes     String
   createdAt DateTime @default(now())
+}
+
+// ─── Custom Product Categories ─────────────────────────────────────────────────
+model CustomProductCategory {
+  id        String   @id @default(cuid())
+  name      String   @unique // e.g. "Kraft Tape", "Foam Tape"
+  fields    String   // JSON: array of field names for data entry
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+// ─── Quotations ────────────────────────────────────────────────────────────────
+model QuotationCounter {
+  id    String @id @default("quotation_counter")
+  value Int    @default(0)
+}
+
+model Quotation {
+  id           String   @id @default(cuid())
+  quotationId  String   @unique // QT-0001, QT-0002, etc.
+  status       String   @default("DRAFT") // DRAFT, SENT, ACCEPTED, REJECTED, EXPIRED
+
+  customerId   String
+  customer     Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  remarks       String?
+  validUntil    DateTime?
+  termsAndCond  String?
+
+  createdById  String
+  createdBy    User     @relation("QuotationCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  items  QuotationItem[]
+}
+
+model QuotationItem {
+  id              String    @id @default(cuid())
+  quotationId     String
+  quotation       Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  productCategory String
+  productDetails  String    // JSON
+  rate            Float?
+  gst             Float?
+  amount          Float?
+  createdAt       DateTime  @default(now())
 }

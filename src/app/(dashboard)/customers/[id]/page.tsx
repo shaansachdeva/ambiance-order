@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import OrderCard from "@/components/OrderCard";
-import { hasPermission, formatDate } from "@/lib/utils";
+import { hasPermission, formatDate, safeParseJSON } from "@/lib/utils";
 import { useLanguage } from "@/contexts/LanguageContext";
 import type { UserRole } from "@/types";
 import { ArrowLeft, MapPin, Package, Calendar } from "lucide-react";
@@ -12,14 +12,15 @@ import Link from "next/link";
 
 export default function CustomerDetailPage() {
   const { id } = useParams();
-  const { data: session } = useSession();
+  const { data: session, status: sessionStatus } = useSession();
   const [customer, setCustomer] = useState<any>(null);
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   const { t, tProduct } = useLanguage();
   const userRole = ((session?.user as any)?.role || "SALES") as UserRole;
-  const showParty = hasPermission(userRole, "view_party");
+  const customPermissions = (session?.user as any)?.customPermissions ?? null;
+  const showParty = hasPermission(userRole, "view_party", customPermissions);
 
   useEffect(() => {
     Promise.all([
@@ -34,7 +35,7 @@ export default function CustomerDetailPage() {
       .catch(() => setLoading(false));
   }, [id]);
 
-  if (loading) {
+  if (loading || sessionStatus === "loading") {
     return (
       <div className="space-y-4">
         <div className="h-8 w-48 bg-gray-200 rounded animate-pulse" />
@@ -137,12 +138,8 @@ export default function CustomerDetailPage() {
                   status: order.status,
                   productDetails:
                     order.items?.length > 0
-                      ? (typeof order.items[0].productDetails === "string"
-                          ? JSON.parse(order.items[0].productDetails)
-                          : order.items[0].productDetails)
-                      : (typeof order.productDetails === "string"
-                          ? JSON.parse(order.productDetails)
-                          : order.productDetails),
+                      ? safeParseJSON(order.items[0].productDetails)
+                      : safeParseJSON(order.productDetails),
                   partyName: customer.partyName,
                   createdAt: order.createdAt,
                   deliveryDeadline: order.deliveryDeadline,

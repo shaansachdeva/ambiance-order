@@ -23,6 +23,9 @@ import {
   Calculator,
   Trash2,
   Barcode,
+  FileText,
+  Layers,
+  FileEdit,
   X as CloseIcon,
 } from "lucide-react";
 import GlobalSearch from "@/components/GlobalSearch";
@@ -35,6 +38,7 @@ interface SidebarProps {
   user: {
     name: string;
     role: UserRole;
+    customPermissions: string[] | null;
   };
 }
 
@@ -50,7 +54,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/orders", labelKey: "nav.orders", icon: Package, roles: "all" },
   { href: "/calendar", labelKey: "nav.calendar", icon: Calendar, roles: "all" },
   { href: "/customers", labelKey: "nav.parties", icon: Users, roles: ["ADMIN", "SALES", "ACCOUNTANT"] },
-  { href: "/production-queue", labelKey: "nav.production", icon: Columns3, roles: ["ADMIN", "PRODUCTION", "DISPATCH"] },
+  { href: "/production-queue", labelKey: "nav.production", icon: Columns3, roles: ["ADMIN", "ACCOUNTANT", "DISPATCH"] },
   { href: "/dispatched", labelKey: "nav.dispatched", icon: Truck, roles: ["ADMIN", "PRODUCTION", "DISPATCH"] },
   { href: "/leads", labelKey: "nav.leads", icon: Target, roles: ["ADMIN", "SALES"] },
   { href: "/production-report", labelKey: "nav.dailyReport", icon: ClipboardList, roles: ["ADMIN", "PRODUCTION"] },
@@ -59,24 +63,27 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/recycle-bin", labelKey: "nav.recycleBin", icon: Trash2, roles: ["ADMIN"] },
   { href: "/calculator", labelKey: "nav.calculator", icon: Calculator, roles: ["ADMIN"] },
   { href: "/barcode", labelKey: "nav.barcode", icon: Barcode, roles: ["ADMIN"] },
+  { href: "/quotations", labelKey: "nav.quotations", icon: FileText, roles: ["ADMIN", "SALES", "ACCOUNTANT"] },
+  { href: "/products", labelKey: "nav.products", icon: Layers, roles: ["ADMIN"] },
+  { href: "/drafts", labelKey: "nav.drafts", icon: FileEdit, roles: ["ADMIN", "SALES", "ACCOUNTANT"] },
   { href: "/orders/new", labelKey: "nav.newOrder", icon: PlusCircle, roles: ["ADMIN", "SALES"] },
   { href: "/settings", labelKey: "nav.settings", icon: Settings, roles: ["ADMIN"] },
 ];
 
 function getVisibleItems(role: UserRole, customPermissions: string[] | null): NavItem[] {
   return NAV_ITEMS.filter((item) => {
-    const roleAllowed = item.roles === "all" || item.roles.includes(role);
-    if (!roleAllowed) return false;
-    // If admin set custom permissions for this user, also require the feature key to be in the list
-    if (customPermissions !== null) return customPermissions.includes(item.labelKey);
-    return true;
+    // If custom permissions are explicitly set for this user, they take precedence
+    if (customPermissions !== null) {
+      return customPermissions.includes(item.labelKey);
+    }
+    // Otherwise, fallback to default role-based access
+    return item.roles === "all" || item.roles.includes(role);
   });
 }
 
 export default function Sidebar({ user }: SidebarProps) {
   const pathname = usePathname();
-  const { data: session } = useSession();
-  const customPermissions = (session?.user as any)?.customPermissions ?? null;
+  const customPermissions = user.customPermissions;
   const visibleItems = getVisibleItems(user.role, customPermissions);
   const [showProfile, setShowProfile] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);

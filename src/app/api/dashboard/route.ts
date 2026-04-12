@@ -109,6 +109,23 @@ export async function GET() {
       count: group._count.id,
     }));
 
+    const userRole = (session.user as any).role;
+    let finalRecentOrders = recentOrders;
+    let finalDelayedOrders = delayedOrders;
+
+    if (userRole === "PRODUCTION") {
+      const obfuscate = (o: any) => {
+        const isPublic = ["READY_FOR_DISPATCH", "DISPATCHED"].includes(o.status);
+        if (isPublic) return o;
+        return {
+          ...o,
+          customer: o.customer ? { ...o.customer, partyName: "Restricted" } : null
+        };
+      };
+      finalRecentOrders = recentOrders.map(obfuscate);
+      finalDelayedOrders = delayedOrders.map(obfuscate);
+    }
+
     return NextResponse.json({
       totalOrders,
       pendingOrders,
@@ -116,9 +133,9 @@ export async function GET() {
       readyForDispatch,
       dispatched,
       rawMaterialNA,
-      recentOrders,
+      recentOrders: finalRecentOrders,
       productWiseCounts,
-      delayedOrders,
+      delayedOrders: finalDelayedOrders,
     });
   } catch (error) {
     console.error("Error fetching dashboard stats:", error);

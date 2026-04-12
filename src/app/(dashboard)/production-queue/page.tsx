@@ -38,7 +38,7 @@ interface PendingMove {
 }
 
 export default function ProductionQueuePage() {
-  const { data: session } = useSession();
+  const { data: session, status: sessionStatus } = useSession();
   const { t, tStatus } = useLanguage();
   const [orders, setOrders] = useState<OrderItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,8 +51,9 @@ export default function ProductionQueuePage() {
   const [rawMaterialNote, setRawMaterialNote] = useState("");
 
   const userRole = ((session?.user as any)?.role || "SALES") as UserRole;
-  const showParty = hasPermission(userRole, "view_party");
-  const canUpdateStatus = ["ADMIN", "PRODUCTION", "DISPATCH"].includes(userRole);
+  const customPermissions = (session?.user as any)?.customPermissions ?? null;
+  const showParty = hasPermission(userRole, "view_party", customPermissions);
+  const canUpdateStatus = ["ADMIN", "PRODUCTION", "DISPATCH", "ACCOUNTANT"].includes(userRole);
 
   const handleDragStart = (e: React.DragEvent, id: string) => {
     setDraggedOrderId(id);
@@ -86,7 +87,7 @@ export default function ProductionQueuePage() {
         setOrders(Array.isArray(data) ? data : []);
         setLoading(false);
       })
-      .catch(() => setLoading(false));
+      .catch(() => { setLoading(false); toast.error("Failed to load orders"); });
   }, []);
 
   useEffect(() => {
@@ -197,7 +198,7 @@ export default function ProductionQueuePage() {
         </div>
       </div>
 
-      {loading ? (
+      {loading || sessionStatus === "loading" ? (
         <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
           {KANBAN_COLUMNS.map((col) => (
             <div key={col.status} className="hidden md:block">

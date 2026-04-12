@@ -10,10 +10,10 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { PRODUCT_CATEGORIES, ORDER_STATUSES } from "@/types";
 import type { UserRole, OrderStatus } from "@/types";
 import toast, { Toaster } from "react-hot-toast";
-import { PlusCircle, Search, Filter, Download, CheckSquare, Trash2 } from "lucide-react";
+import { PlusCircle, Search, Filter, Download, CheckSquare, Trash2, FileEdit, Clock, ChevronDown, ChevronUp } from "lucide-react";
 
 export default function OrdersPage() {
-  const { data: session } = useSession();
+  const { data: session, status: sessionStatus } = useSession();
   const { t, tStatus, tProduct } = useLanguage();
   const searchParams = useSearchParams();
   const [orders, setOrders] = useState<any[]>([]);
@@ -26,6 +26,43 @@ export default function OrdersPage() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const deleteToastRef = useRef<string | null>(null);
 
+  // Draft management
+  const [draftOrder, setDraftOrder] = useState<any>(null);
+  const [discardedDrafts, setDiscardedDrafts] = useState<any[]>([]);
+  const [showDiscarded, setShowDiscarded] = useState(false);
+
+  useEffect(() => {
+    try {
+      const d = localStorage.getItem("order_draft");
+      if (d) setDraftOrder(JSON.parse(d));
+    } catch {}
+    try {
+      const dd = localStorage.getItem("discarded_drafts");
+      if (dd) setDiscardedDrafts(JSON.parse(dd));
+    } catch {}
+  }, []);
+
+  const deleteDraftPermanently = () => {
+    const snap = localStorage.getItem("order_draft");
+    if (snap) {
+      try {
+        const existing: any[] = JSON.parse(localStorage.getItem("discarded_drafts") || "[]");
+        const parsed = JSON.parse(snap);
+        existing.unshift({ ...parsed, discardedAt: new Date().toISOString() });
+        localStorage.setItem("discarded_drafts", JSON.stringify(existing.slice(0, 10)));
+        setDiscardedDrafts(existing.slice(0, 10));
+      } catch {}
+    }
+    localStorage.removeItem("order_draft");
+    setDraftOrder(null);
+  };
+
+  const deleteDiscarded = (idx: number) => {
+    const next = discardedDrafts.filter((_, i) => i !== idx);
+    setDiscardedDrafts(next);
+    localStorage.setItem("discarded_drafts", JSON.stringify(next));
+  };
+
   // Bulk selection
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -33,8 +70,9 @@ export default function OrdersPage() {
   const [showBulkMenu, setShowBulkMenu] = useState(false);
 
   const userRole = ((session?.user as any)?.role || "SALES") as UserRole;
-  const showParty = hasPermission(userRole, "view_party");
-  const canCreate = hasPermission(userRole, "create_order");
+  const customPermissions = (session?.user as any)?.customPermissions ?? null;
+  const showParty = hasPermission(userRole, "view_party", customPermissions);
+  const canCreate = hasPermission(userRole, "create_order", customPermissions);
   const canBulkUpdate = ["ADMIN", "PRODUCTION", "DISPATCH"].includes(userRole);
 
   // Debounce search input — only fire API after 350ms of no typing
@@ -51,7 +89,7 @@ export default function OrdersPage() {
     if (categoryFilter) params.set("productCategory", categoryFilter);
     if (debouncedSearch) params.set("search", debouncedSearch);
 
-    fetch(`/api/orders?${params}`)
+    fetch(`/api/orders?${params}`, { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => {
         setOrders(Array.isArray(data) ? data : []);
@@ -339,15 +377,86 @@ export default function OrdersPage() {
         </div>
       </div>
 
+      {/* Saved Draft Banner */}
+      {draftOrder && canCreate && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <FileEdit className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-amber-800">Unsaved Draft</p>
+              <p className="text-xs text-amber-600 mt-0.5">
+                {draftOrder.savedAt
+                  ? `Last saved ${new Date(draftOrder.savedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`
+                  : "Draft found"
+                }
+                {draftOrder.customerId ? " — customer selected" : ""}
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-2 shrink-0">
+            <Link
+              href="/orders/new"
+              className="px-3 py-1.5 text-xs font-semibold text-white bg-amber-600 rounded-lg hover:bg-amber-700"
+            >
+              Continue
+            </Link>
+            <button
+              onClick={deleteDraftPermanently}
+              className="px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-100 rounded-lg hover:bg-amber-200"
+            >
+              Discard
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Discarded Drafts */}
+      {discardedDrafts.length > 0 && (
+        <div>
+          <button
+            onClick={() => setShowDiscarded(!showDiscarded)}
+            className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 font-medium"
+          >
+            <Clock className="w-3.5 h-3.5" />
+            {discardedDrafts.length} discarded draft{discardedDrafts.length !== 1 ? "s" : ""}
+            {showDiscarded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          </button>
+          {showDiscarded && (
+            <div className="mt-2 space-y-2">
+              {discardedDrafts.map((d, i) => (
+                <div key={i} className="bg-gray-50 border border-gray-200 rounded-xl p-3 flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-medium text-gray-700">
+                      Draft discarded {d.discardedAt ? new Date(d.discardedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {d.items?.length || 0} item{d.items?.length !== 1 ? "s" : ""}
+                      {d.remarks ? ` · ${d.remarks.slice(0, 40)}` : ""}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => deleteDiscarded(i)}
+                    className="p-1.5 text-gray-400 hover:text-red-500 rounded-lg hover:bg-red-50"
+                    title="Remove from discarded list"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Results Count */}
-      {!loading && (
+      {!(loading || sessionStatus === "loading") && (
         <p className="text-xs text-gray-500">
           {t("orders.showing")} {orders.length} {orders.length !== 1 ? t("orders.orders") : t("orders.order")}
         </p>
       )}
 
       {/* Orders List */}
-      {loading ? (
+      {loading || sessionStatus === "loading" ? (
         <div className="space-y-3">
           {[...Array(5)].map((_, i) => (
             <div key={i} className="h-24 bg-gray-200 rounded-xl animate-pulse" />

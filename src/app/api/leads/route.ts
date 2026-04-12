@@ -12,12 +12,16 @@ export async function GET(request: Request) {
 
     const { searchParams } = new URL(request.url);
     const date = searchParams.get('date');
+    const search = searchParams.get('search');
+    const salesPersonId = searchParams.get('salesPersonId');
 
     const whereClause: any = {};
 
-    // For Sales people, only show their leads, Admin can see all
+    // For Sales people, only show their leads, Admin can see all (optionally filtered by salesPersonId)
     if ((session.user as any).role === "SALES") {
       whereClause.salesPersonId = (session.user as any).id;
+    } else if (salesPersonId) {
+      whereClause.salesPersonId = salesPersonId;
     }
 
     if (date) {
@@ -30,6 +34,15 @@ export async function GET(request: Request) {
         gte: startOfDay,
         lte: endOfDay
       };
+    }
+
+    if (search) {
+      whereClause.OR = [
+        { companyName: { contains: search } },
+        { remarks: { contains: search } },
+        { contacts: { some: { name: { contains: search } } } },
+        { contacts: { some: { phone: { contains: search } } } },
+      ];
     }
 
     const leads = await prisma.lead.findMany({

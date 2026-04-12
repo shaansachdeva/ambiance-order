@@ -30,7 +30,7 @@ interface Customer {
 }
 
 export default function CustomersPage() {
-  const { data: session } = useSession();
+  const { data: session, status: sessionStatus } = useSession();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [newName, setNewName] = useState("");
@@ -47,7 +47,8 @@ export default function CustomersPage() {
 
   const { t } = useLanguage();
   const userRole = ((session?.user as any)?.role || "SALES") as UserRole;
-  const canAdd = hasPermission(userRole, "create_order");
+  const customPermissions = (session?.user as any)?.customPermissions ?? null;
+  const canAdd = hasPermission(userRole, "create_order", customPermissions);
   const isAdmin = userRole === "ADMIN";
 
   const fetchCustomers = useCallback(() => {
@@ -345,7 +346,7 @@ export default function CustomersPage() {
       )}
 
       {/* Customer List */}
-      {loading ? (
+      {loading || sessionStatus === "loading" ? (
         <div className="space-y-2">
           {[...Array(5)].map((_, i) => (
             <div key={i} className="h-14 bg-gray-200 rounded-lg animate-pulse" />

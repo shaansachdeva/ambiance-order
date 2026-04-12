@@ -65,9 +65,75 @@ export default function NewOrderPage() {
   const [leadLoaded, setLeadLoaded] = useState(false);
   const [leadCompany, setLeadCompany] = useState("");
   const [isDirty, setIsDirty] = useState(false);
+  const [customCategories, setCustomCategories] = useState<{ id: string; name: string; fields: string }[]>([]);
 
   const userRole = ((session?.user as any)?.role || "SALES") as UserRole;
-  const canCreate = hasPermission(userRole, "create_order");
+  const customPermissions = (session?.user as any)?.customPermissions ?? null;
+  const canCreate = hasPermission(userRole, "create_order", customPermissions);
+
+  const [draftBanner, setDraftBanner] = useState<any>(null);
+
+  // Load draft from localStorage — show a persistent banner instead of a fleeting toast
+  useEffect(() => {
+    if (leadId) return; // don't restore draft when converting a lead
+    const saved = localStorage.getItem("order_draft");
+    if (saved) {
+      try {
+        const draft = JSON.parse(saved);
+        setDraftBanner(draft);
+      } catch { localStorage.removeItem("order_draft"); }
+    }
+  }, [leadId]);
+
+  const restoreDraft = (draft: any) => {
+    setCustomerId(draft.customerId || "");
+    setItems(draft.items?.length ? draft.items : [newItem()]);
+    setDeliveryDeadline(draft.deliveryDeadline || "");
+    setRemarks(draft.remarks || "");
+    setPriority(draft.priority || "NORMAL");
+    setIsDirty(true);
+    setDraftBanner(null);
+    toast.success("Draft restored");
+  };
+
+  const discardDraft = () => {
+    // Store a snapshot in discarded_drafts for the user to review later
+    const saved = localStorage.getItem("order_draft");
+    if (saved) {
+      try {
+        const existing: any[] = JSON.parse(localStorage.getItem("discarded_drafts") || "[]");
+        const parsed = JSON.parse(saved);
+        existing.unshift({ ...parsed, discardedAt: new Date().toISOString() });
+        localStorage.setItem("discarded_drafts", JSON.stringify(existing.slice(0, 10))); // keep last 10
+      } catch {}
+    }
+    localStorage.removeItem("order_draft");
+    setDraftBanner(null);
+  };
+
+  // Auto-save draft whenever form data changes (works independently of isDirty)
+  useEffect(() => {
+    if (submitting || leadId) return;
+    // Only save if the form has meaningful data (customer selected or items filled)
+    const hasData = customerId || items.some(i => i.productCategory || Object.keys(i.productDetails).length > 0) || remarks || deliveryDeadline;
+    if (!hasData) return;
+    const draft = {
+      customerId,
+      items: items.map(item => ({ ...item, image: null, imagePreview: "" })),
+      deliveryDeadline,
+      remarks,
+      priority,
+      savedAt: new Date().toISOString(),
+    };
+    localStorage.setItem("order_draft", JSON.stringify(draft));
+  }, [customerId, items, deliveryDeadline, remarks, priority, submitting, leadId]);
+
+  useEffect(() => {
+    fetch("/api/product-categories")
+      .then((r) => r.json())
+      .then((d) => setCustomCategories(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     fetch("/api/customers")
@@ -304,6 +370,7 @@ export default function NewOrderPage() {
           }
         }
         setIsDirty(false);
+        localStorage.removeItem("order_draft");
         toast.success(`Order ${data.orderId} created successfully!`);
         setTimeout(() => router.push("/orders"), 500);
       } else {
@@ -335,6 +402,29 @@ export default function NewOrderPage() {
         </button>
         <h1 className="text-xl font-bold text-gray-900">{leadId ? t("newOrder.confirmCreate") : t("newOrder.title")}</h1>
       </div>
+
+      {/* Draft restore banner — shown whenever a draft is found in localStorage */}
+      {draftBanner && !leadId && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-2">
+          <p className="text-sm font-semibold text-amber-800 mb-2">You have an unsaved draft from {draftBanner.savedAt ? new Date(draftBanner.savedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "earlier"}.</p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => restoreDraft(draftBanner)}
+              className="px-3 py-1.5 text-xs font-semibold text-white bg-amber-600 rounded-lg hover:bg-amber-700"
+            >
+              Restore Draft
+            </button>
+            <button
+              type="button"
+              onClick={discardDraft}
+              className="px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-100 rounded-lg hover:bg-amber-200"
+            >
+              Discard
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Lead Conversion Banner */}
       {leadId && (
@@ -489,17 +579,43 @@ export default function NewOrderPage() {
                           {tProduct(cat.value)}
                         </button>
                       ))}
+                      {customCategories.map((cat) => (
+                        <button
+                          key={cat.id}
+                          type="button"
+                          onClick={() => {
+                            if (cat.name !== item.productCategory) {
+                              updateItem(item.id, { productCategory: cat.name as ProductCategory, productDetails: {} });
+                            }
+                          }}
+                          className={`px-3 py-2 text-sm rounded-lg border-2 font-medium transition-all ${
+                            item.productCategory === cat.name
+                              ? "border-purple-500 bg-purple-50 text-purple-700"
+                              : "border-gray-200 text-gray-600 hover:border-gray-300"
+                          }`}
+                        >
+                          {cat.name}
+                        </button>
+                      ))}
                     </div>
                   </div>
 
                   {/* Product details form */}
-                  {item.productCategory && (
-                    <ProductForm
-                      productCategory={item.productCategory as ProductCategory}
-                      productDetails={item.productDetails}
-                      onChange={(details) => updateItem(item.id, { productDetails: details })}
-                    />
-                  )}
+                  {item.productCategory && (() => {
+                    const customCat = customCategories.find((c) => c.name === item.productCategory);
+                    let customFields: string[] | undefined;
+                    if (customCat) {
+                      try { customFields = JSON.parse(customCat.fields); } catch {}
+                    }
+                    return (
+                      <ProductForm
+                        productCategory={item.productCategory as ProductCategory}
+                        productDetails={item.productDetails}
+                        onChange={(details) => updateItem(item.id, { productDetails: details })}
+                        customFields={customFields}
+                      />
+                    );
+                  })()}
 
                   {/* Rate & GST */}
                   <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-100">

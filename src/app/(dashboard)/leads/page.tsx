@@ -14,6 +14,8 @@ import {
   Square,
   Download,
   Trash2,
+  Search,
+  Users,
 } from "lucide-react";
 import Link from "next/link";
 import { format } from "date-fns";
@@ -29,6 +31,11 @@ interface Lead {
   nextFollowUp: string | null;
   salesPerson: { name: string };
   createdAt: string;
+}
+
+interface SalesUser {
+  id: string;
+  name: string;
 }
 
 type SortKey = "newest" | "oldest" | "name_asc" | "name_desc" | "status" | "followup";
@@ -76,6 +83,13 @@ export default function LeadsPage() {
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState<SortKey>("newest");
   const [showSort, setShowSort] = useState(false);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Admin filter by sales person
+  const [salesUsers, setSalesUsers] = useState<SalesUser[]>([]);
+  const [filterSalesPerson, setFilterSalesPerson] = useState<string>("all");
 
   // Multi-select
   const [selectionMode, setSelectionMode] = useState(false);
@@ -85,9 +99,32 @@ export default function LeadsPage() {
 
   const canDelete = ["ADMIN", "SALES"].includes(userRole);
 
+  // Debounce search
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setDebouncedSearch(search), 350);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [search]);
+
+  // Fetch SALES users for admin filter
+  useEffect(() => {
+    if (userRole === "ADMIN") {
+      fetch("/api/users?role=SALES")
+        .then((r) => r.json())
+        .then((data) => setSalesUsers(Array.isArray(data) ? data : []))
+        .catch(() => {});
+    }
+  }, [userRole]);
+
   const fetchLeads = () => {
     setLoading(true);
-    fetch("/api/leads")
+    const params = new URLSearchParams();
+    if (debouncedSearch) params.set("search", debouncedSearch);
+    if (userRole === "ADMIN" && filterSalesPerson !== "all") {
+      params.set("salesPersonId", filterSalesPerson);
+    }
+
+    fetch(`/api/leads?${params}`)
       .then((res) => res.json())
       .then((data) => {
         setLeads(Array.isArray(data) ? data : []);
@@ -98,7 +135,7 @@ export default function LeadsPage() {
 
   useEffect(() => {
     fetchLeads();
-  }, []);
+  }, [debouncedSearch, filterSalesPerson]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -274,6 +311,49 @@ export default function LeadsPage() {
         </div>
       </div>
 
+      {/* Search Bar */}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search leads by company, contact or remarks..."
+          className="w-full pl-9 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 transition-shadow shadow-sm"
+        />
+      </div>
+
+      {/* Admin: Sales person filter */}
+      {userRole === "ADMIN" && salesUsers.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <Users className="w-4 h-4 text-gray-400 shrink-0" />
+          <span className="text-xs text-gray-500 font-medium">View as:</span>
+          <button
+            onClick={() => setFilterSalesPerson("all")}
+            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+              filterSalesPerson === "all"
+                ? "bg-brand-500 text-white"
+                : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+            }`}
+          >
+            All
+          </button>
+          {salesUsers.map((u) => (
+            <button
+              key={u.id}
+              onClick={() => setFilterSalesPerson(u.id)}
+              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                filterSalesPerson === u.id
+                  ? "bg-brand-500 text-white"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}
+            >
+              {u.name}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Bulk action bar */}
       {selectionMode && selectedIds.size > 0 && (
         <div className="bg-brand-50 border border-brand-200 rounded-xl p-3 flex items-center justify-between gap-2 flex-wrap">
@@ -371,6 +451,12 @@ export default function LeadsPage() {
                       <span className="flex items-center gap-1.5 text-brand-600 font-medium">
                         <Calendar className="w-4 h-4" />
                         {t("leads.followUpLabel")} {format(new Date(lead.nextFollowUp), "MMM d, yyyy")}
+                      </span>
+                    )}
+                    {userRole === "ADMIN" && lead.salesPerson && (
+                      <span className="flex items-center gap-1.5 text-gray-400">
+                        <Users className="w-3.5 h-3.5" />
+                        {lead.salesPerson.name}
                       </span>
                     )}
                   </div>
