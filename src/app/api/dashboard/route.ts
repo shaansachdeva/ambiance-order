@@ -97,6 +97,10 @@ export async function GET() {
       }),
     ]);
 
+    const pendingApprovals = await prisma.order.count({
+      where: { status: "PENDING_CONFIRMATION", deletedAt: null },
+    });
+
     // Filter delayed orders: past deliveryDeadline and not dispatched
     const now = new Date();
     const delayedOrders = allOrders.filter(
@@ -133,6 +137,7 @@ export async function GET() {
       readyForDispatch,
       dispatched,
       rawMaterialNA,
+      pendingApprovals,
       recentOrders: finalRecentOrders,
       productWiseCounts,
       delayedOrders: finalDelayedOrders,

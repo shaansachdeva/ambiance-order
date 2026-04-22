@@ -16,12 +16,14 @@ export const PRODUCT_CATEGORIES: { value: ProductCategory; label: string }[] = [
 
 // Order Statuses
 export type OrderStatus =
+  | "PENDING_CONFIRMATION"
   | "ORDER_PLACED"
   | "CONFIRMED"
   | "IN_PRODUCTION"
   | "RAW_MATERIAL_NA"
   | "READY_FOR_DISPATCH"
-  | "DISPATCHED";
+  | "DISPATCHED"
+  | "REJECTED";
 
 export const ORDER_STATUSES: { value: OrderStatus; label: string; color: string }[] = [
   { value: "ORDER_PLACED", label: "Order Placed", color: "bg-blue-100 text-blue-800" },

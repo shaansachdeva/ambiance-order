@@ -499,18 +499,51 @@ function CustomFieldForm({
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-      {fields.map((field) => (
-        <InputField
-          key={field.name}
-          label={field.name}
-          value={details[field.name] || ""}
-          onChange={(v) => update(field.name, v)}
-          disabled={disabled}
-          type={field.type === "number" ? "number" : "text"}
-          readOnly={field.type === "formula"}
-          placeholder={field.type === "formula" ? "Auto-calculated" : `Enter ${field.name.toLowerCase()}`}
-        />
-      ))}
+      {fields.map((field) => {
+        if (field.type === "quantity") {
+          return (
+            <div key={field.name} className="space-y-1">
+              <label className="text-xs font-medium text-gray-600 flex items-center gap-1">
+                {field.name}
+                {field.unit && <span className="text-gray-400 font-normal">({field.unit})</span>}
+              </label>
+              <div className="flex">
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  value={details[field.name] || ""}
+                  onChange={(e) => update(field.name, e.target.value)}
+                  disabled={disabled}
+                  placeholder="0"
+                  className={cn(
+                    "flex-1 min-w-0 px-3 py-2 text-sm border border-gray-300 rounded-l-lg focus:outline-none focus:ring-2 focus:ring-brand-500",
+                    field.unit ? "" : "rounded-r-lg",
+                    disabled && "bg-gray-50 text-gray-500"
+                  )}
+                />
+                {field.unit && (
+                  <span className="px-3 py-2 text-sm font-medium text-gray-600 bg-gray-50 border border-l-0 border-gray-300 rounded-r-lg shrink-0">
+                    {field.unit}
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        }
+        return (
+          <InputField
+            key={field.name}
+            label={field.name}
+            value={details[field.name] || ""}
+            onChange={(v) => update(field.name, v)}
+            disabled={disabled}
+            type={field.type === "number" ? "number" : "text"}
+            readOnly={field.type === "formula"}
+            placeholder={field.type === "formula" ? "Auto-calculated" : `Enter ${field.name.toLowerCase()}`}
+          />
+        );
+      })}
     </div>
   );
 }
@@ -519,7 +552,7 @@ function CustomFieldForm({
 /*  Main ProductForm component                                         */
 /* ------------------------------------------------------------------ */
 
-export default function ProductForm({
+function ProductForm({
   productCategory,
   productDetails,
   onChange,
@@ -574,3 +607,5 @@ export default function ProductForm({
       );
   }
 }
+
+export default ProductForm;

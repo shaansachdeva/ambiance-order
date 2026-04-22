@@ -27,6 +27,8 @@ import {
   Layers,
   FileEdit,
   X as CloseIcon,
+  ShieldCheck,
+  GripVertical,
 } from "lucide-react";
 import GlobalSearch from "@/components/GlobalSearch";
 import { cn } from "@/lib/utils";
@@ -67,6 +69,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/products", labelKey: "nav.products", icon: Layers, roles: ["ADMIN"] },
   { href: "/drafts", labelKey: "nav.drafts", icon: FileEdit, roles: ["ADMIN", "SALES", "ACCOUNTANT"] },
   { href: "/orders/new", labelKey: "nav.newOrder", icon: PlusCircle, roles: ["ADMIN", "SALES"] },
+  { href: "/pending-approvals", labelKey: "nav.pendingApprovals", icon: ShieldCheck, roles: ["ADMIN"] },
   { href: "/settings", labelKey: "nav.settings", icon: Settings, roles: ["ADMIN"] },
 ];
 
@@ -81,10 +84,67 @@ function getVisibleItems(role: UserRole, customPermissions: string[] | null): Na
   });
 }
 
+const NAV_ORDER_KEY = "sidebar_nav_order";
+
+function applySavedOrder(items: NavItem[], saved: string[]): NavItem[] {
+  if (!saved.length) return items;
+  const indexed = new Map(items.map((item) => [item.href, item]));
+  const ordered: NavItem[] = [];
+  // First add items that are in the saved order
+  for (const href of saved) {
+    if (indexed.has(href)) {
+      ordered.push(indexed.get(href)!);
+      indexed.delete(href);
+    }
+  }
+  // Then append any new items not in saved order
+  for (const item of Array.from(indexed.values())) {
+    ordered.push(item);
+  }
+  return ordered;
+}
+
 export default function Sidebar({ user }: SidebarProps) {
   const pathname = usePathname();
   const customPermissions = user.customPermissions;
-  const visibleItems = getVisibleItems(user.role, customPermissions);
+  const baseVisibleItems = getVisibleItems(user.role, customPermissions);
+
+  const [savedOrder, setSavedOrder] = useState<string[]>([]);
+  const [dragOver, setDragOver] = useState<string | null>(null);
+  const dragSrcRef = useRef<string | null>(null);
+
+  // Load saved order from localStorage
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(NAV_ORDER_KEY);
+      if (raw) setSavedOrder(JSON.parse(raw));
+    } catch {}
+  }, []);
+
+  const visibleItems = applySavedOrder(baseVisibleItems, savedOrder);
+
+  const handleDragStart = (href: string) => {
+    dragSrcRef.current = href;
+  };
+
+  const handleDrop = (targetHref: string) => {
+    const srcHref = dragSrcRef.current;
+    if (!srcHref || srcHref === targetHref) {
+      setDragOver(null);
+      return;
+    }
+    const current = visibleItems.map((i) => i.href);
+    const srcIdx = current.indexOf(srcHref);
+    const tgtIdx = current.indexOf(targetHref);
+    const updated = [...current];
+    updated.splice(srcIdx, 1);
+    updated.splice(tgtIdx, 0, srcHref);
+    setSavedOrder(updated);
+    localStorage.setItem(NAV_ORDER_KEY, JSON.stringify(updated));
+    dragSrcRef.current = null;
+    setDragOver(null);
+  };
+
   const [showProfile, setShowProfile] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
@@ -182,26 +242,40 @@ export default function Sidebar({ user }: SidebarProps) {
               pathname === item.href ||
               (item.href !== "/" && pathname.startsWith(item.href));
             const Icon = item.icon;
+            const isDragTarget = dragOver === item.href;
 
             return (
-              <Link
+              <div
                 key={item.href}
-                href={item.href}
+                draggable
+                onDragStart={() => handleDragStart(item.href)}
+                onDragOver={(e) => { e.preventDefault(); setDragOver(item.href); }}
+                onDragLeave={() => setDragOver(null)}
+                onDrop={() => handleDrop(item.href)}
                 className={cn(
-                  "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
-                  isActive
-                    ? "bg-brand-50 text-brand-700"
-                    : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                  "group relative rounded-lg transition-all",
+                  isDragTarget && "border-2 border-brand-400 border-dashed bg-brand-50/50"
                 )}
               >
-                <Icon
+                <Link
+                  href={item.href}
                   className={cn(
-                    "w-5 h-5 flex-shrink-0",
-                    isActive ? "text-brand-500" : "text-gray-400"
+                    "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                    isActive
+                      ? "bg-brand-50 text-brand-700"
+                      : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
                   )}
-                />
-                {t(item.labelKey)}
-              </Link>
+                >
+                  <GripVertical className="w-3.5 h-3.5 text-gray-300 opacity-0 group-hover:opacity-100 flex-shrink-0 cursor-grab absolute left-1 top-1/2 -translate-y-1/2" />
+                  <Icon
+                    className={cn(
+                      "w-5 h-5 flex-shrink-0",
+                      isActive ? "text-brand-500" : "text-gray-400"
+                    )}
+                  />
+                  {t(item.labelKey)}
+                </Link>
+              </div>
             );
           })}
         </nav>
@@ -296,27 +370,38 @@ export default function Sidebar({ user }: SidebarProps) {
                   pathname === item.href ||
                   (item.href !== "/" && pathname.startsWith(item.href));
                 const Icon = item.icon;
+                const isDragTarget = dragOver === item.href;
 
                 return (
-                  <Link
+                  <div
                     key={item.href}
-                    href={item.href}
-                    onClick={() => setShowMobileMenu(false)}
-                    className={cn(
-                      "flex items-center gap-3 px-4 py-3 text-sm font-medium transition-colors",
-                      isActive
-                        ? "bg-brand-50 text-brand-700 border-r-4 border-brand-500"
-                        : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
-                    )}
+                    draggable
+                    onDragStart={() => handleDragStart(item.href)}
+                    onDragOver={(e) => { e.preventDefault(); setDragOver(item.href); }}
+                    onDragLeave={() => setDragOver(null)}
+                    onDrop={() => handleDrop(item.href)}
+                    className={cn(isDragTarget && "border-l-4 border-brand-400 bg-brand-50/50")}
                   >
-                    <Icon
+                    <Link
+                      href={item.href}
+                      onClick={() => setShowMobileMenu(false)}
                       className={cn(
-                        "w-5 h-5",
-                        isActive ? "text-brand-500" : "text-gray-400"
+                        "flex items-center gap-3 px-4 py-3 text-sm font-medium transition-colors",
+                        isActive
+                          ? "bg-brand-50 text-brand-700 border-r-4 border-brand-500"
+                          : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
                       )}
-                    />
-                    {t(item.labelKey)}
-                  </Link>
+                    >
+                      <GripVertical className="w-4 h-4 text-gray-300 flex-shrink-0" />
+                      <Icon
+                        className={cn(
+                          "w-5 h-5",
+                          isActive ? "text-brand-500" : "text-gray-400"
+                        )}
+                      />
+                      {t(item.labelKey)}
+                    </Link>
+                  </div>
                 );
               })}
             </nav>

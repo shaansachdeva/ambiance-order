@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, Suspense } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import ProductForm from "@/components/ProductForm";
@@ -8,7 +8,7 @@ import { PRODUCT_CATEGORIES } from "@/types";
 import type { UserRole, ProductCategory } from "@/types";
 import { hasPermission } from "@/lib/utils";
 import toast, { Toaster } from "react-hot-toast";
-import { ArrowLeft, Send, Plus, Trash2, ChevronDown, ChevronUp, IndianRupee, ImagePlus, X } from "lucide-react";
+import { ArrowLeft, Send, Plus, Trash2, ChevronDown, ChevronUp, IndianRupee, ImagePlus, X, Search, Building2, MapPin, UserPlus, Check } from "lucide-react";
 import { useLanguage } from "@/contexts/LanguageContext";
 
 interface Customer {
@@ -42,7 +42,7 @@ function newItem(): OrderItemData {
   };
 }
 
-export default function NewOrderPage() {
+function NewOrderPageContent() {
   const { data: session, status: sessionStatus } = useSession();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -54,6 +54,10 @@ export default function NewOrderPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [customersLoaded, setCustomersLoaded] = useState(false);
   const [customerId, setCustomerId] = useState("");
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [customerDropdownOpen, setCustomerDropdownOpen] = useState(false);
+  const [customerHighlight, setCustomerHighlight] = useState(0);
+  const customerBoxRef = useRef<HTMLDivElement>(null);
   const [newPartyName, setNewPartyName] = useState(partyParam || "");
   const [newPartyLocation, setNewPartyLocation] = useState("");
   const [showNewParty, setShowNewParty] = useState(initialNewPartyState);
@@ -62,10 +66,12 @@ export default function NewOrderPage() {
   const [remarks, setRemarks] = useState("");
   const [priority, setPriority] = useState<"NORMAL" | "URGENT">("NORMAL");
   const [submitting, setSubmitting] = useState(false);
+  const orderSubmittedRef = useRef(false);
   const [leadLoaded, setLeadLoaded] = useState(false);
   const [leadCompany, setLeadCompany] = useState("");
   const [isDirty, setIsDirty] = useState(false);
   const [customCategories, setCustomCategories] = useState<{ id: string; name: string; fields: string }[]>([]);
+  const [builtinOverrides, setBuiltinOverrides] = useState<Record<string, { hidden: boolean; label: string | null }>>({});
 
   const userRole = ((session?.user as any)?.role || "SALES") as UserRole;
   const customPermissions = (session?.user as any)?.customPermissions ?? null;
@@ -113,7 +119,7 @@ export default function NewOrderPage() {
 
   // Auto-save draft whenever form data changes (works independently of isDirty)
   useEffect(() => {
-    if (submitting || leadId) return;
+    if (submitting || leadId || orderSubmittedRef.current) return;
     // Only save if the form has meaningful data (customer selected or items filled)
     const hasData = customerId || items.some(i => i.productCategory || Object.keys(i.productDetails).length > 0) || remarks || deliveryDeadline;
     if (!hasData) return;
@@ -133,7 +139,22 @@ export default function NewOrderPage() {
       .then((r) => r.json())
       .then((d) => setCustomCategories(Array.isArray(d) ? d : []))
       .catch(() => {});
+    fetch("/api/builtin-categories")
+      .then((r) => r.json())
+      .then((d) => {
+        if (!Array.isArray(d)) return;
+        const map: Record<string, { hidden: boolean; label: string | null }> = {};
+        for (const o of d) map[o.key] = { hidden: !!o.hidden, label: o.label ?? null };
+        setBuiltinOverrides(map);
+      })
+      .catch(() => {});
   }, []);
+
+  const visibleBuiltins = PRODUCT_CATEGORIES.filter((c) => !builtinOverrides[c.value]?.hidden);
+  const builtinLabelFor = (key: string): string => {
+    const override = builtinOverrides[key]?.label?.trim();
+    return override || tProduct(key);
+  };
 
   useEffect(() => {
     fetch("/api/customers")
@@ -150,6 +171,18 @@ export default function NewOrderPage() {
       })
       .catch(() => { setCustomersLoaded(true); });
   }, []);
+
+  // Close party dropdown on outside click
+  useEffect(() => {
+    if (!customerDropdownOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (customerBoxRef.current && !customerBoxRef.current.contains(e.target as Node)) {
+        setCustomerDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [customerDropdownOpen]);
 
   // Fetch lead data and pre-fill the form
   useEffect(() => {
@@ -370,8 +403,13 @@ export default function NewOrderPage() {
           }
         }
         setIsDirty(false);
+        orderSubmittedRef.current = true;
         localStorage.removeItem("order_draft");
-        toast.success(`Order ${data.orderId} created successfully!`);
+        const isPending = data.status === "PENDING_CONFIRMATION";
+        toast.success(isPending
+          ? `Order ${data.orderId} submitted — awaiting admin confirmation`
+          : `Order ${data.orderId} created successfully!`
+        );
         setTimeout(() => router.push("/orders"), 500);
       } else {
         toast.error((data.detail ? `${data.error}: ${data.detail}` : data.error) || "Failed to create order");
@@ -445,60 +483,207 @@ export default function NewOrderPage() {
             {t("newOrder.partyName")}
           </label>
 
-          {!showNewParty ? (
-            <div className="space-y-2">
-              <select
-                value={customerId}
-                onChange={(e) => { setIsDirty(true); setCustomerId(e.target.value); }}
-                className="w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white"
-              >
-                <option value="">{t("newOrder.selectParty")}</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.partyName}{c.location ? ` — ${c.location}` : ""}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={() => setShowNewParty(true)}
-                className="text-sm text-brand-600 hover:text-brand-700 font-medium"
-              >
-                {t("newOrder.addNewParty")}
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <input
-                type="text"
-                value={newPartyName}
-                onChange={(e) => setNewPartyName(e.target.value)}
-                placeholder={t("newOrder.enterPartyName")}
-                className="w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-              />
-              <div className="flex gap-2">
+          {!showNewParty ? (() => {
+            const selected = customers.find(c => c.id === customerId);
+            const q = customerSearch.trim().toLowerCase();
+            const filtered = customers.filter(c =>
+              !q ||
+              c.partyName.toLowerCase().includes(q) ||
+              (c.location || "").toLowerCase().includes(q)
+            );
+            const exactMatch = q && customers.some(c => c.partyName.toLowerCase() === q);
+            const showCreateRow = q.length > 0 && !exactMatch;
+            const totalRows = filtered.length + (showCreateRow ? 1 : 0);
+            return (
+              <div ref={customerBoxRef} className="relative">
+                {selected && !customerDropdownOpen ? (
+                  /* Selected chip */
+                  <button
+                    type="button"
+                    onClick={() => { setCustomerDropdownOpen(true); setCustomerSearch(""); setCustomerHighlight(0); }}
+                    className="w-full flex items-center justify-between gap-2 px-3 py-2.5 bg-brand-50 border-2 border-brand-300 rounded-lg hover:border-brand-400 transition-colors group"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-8 h-8 rounded-full bg-brand-500 text-white flex items-center justify-center text-xs font-bold shrink-0">
+                        {selected.partyName.charAt(0).toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0 text-left">
+                        <p className="text-sm font-semibold text-gray-900 truncate">{selected.partyName}</p>
+                        {selected.location && (
+                          <p className="text-xs text-gray-500 truncate flex items-center gap-1">
+                            <MapPin className="w-3 h-3" />{selected.location}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => { e.stopPropagation(); setIsDirty(true); setCustomerId(""); setCustomerSearch(""); setCustomerDropdownOpen(true); }}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); setIsDirty(true); setCustomerId(""); setCustomerSearch(""); setCustomerDropdownOpen(true); } }}
+                      className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-white rounded-lg shrink-0 cursor-pointer"
+                      aria-label="Clear selection"
+                    >
+                      <X className="w-4 h-4" />
+                    </span>
+                  </button>
+                ) : (
+                  <>
+                    {/* Combobox input */}
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                      <input
+                        type="text"
+                        value={customerSearch}
+                        onFocus={() => { setCustomerDropdownOpen(true); setCustomerHighlight(0); }}
+                        onChange={(e) => { setCustomerSearch(e.target.value); setCustomerDropdownOpen(true); setCustomerHighlight(0); }}
+                        onKeyDown={(e) => {
+                          if (e.key === "ArrowDown") { e.preventDefault(); setCustomerDropdownOpen(true); setCustomerHighlight(h => Math.min(totalRows - 1, h + 1)); }
+                          else if (e.key === "ArrowUp") { e.preventDefault(); setCustomerHighlight(h => Math.max(0, h - 1)); }
+                          else if (e.key === "Enter") {
+                            e.preventDefault();
+                            if (customerHighlight < filtered.length) {
+                              const pick = filtered[customerHighlight];
+                              if (pick) { setIsDirty(true); setCustomerId(pick.id); setCustomerDropdownOpen(false); setCustomerSearch(""); }
+                            } else if (showCreateRow) {
+                              setNewPartyName(customerSearch.trim()); setShowNewParty(true); setCustomerDropdownOpen(false);
+                            }
+                          } else if (e.key === "Escape") {
+                            setCustomerDropdownOpen(false);
+                          }
+                        }}
+                        placeholder={customersLoaded ? (customers.length === 0 ? "No parties yet — type to add new" : "Search or add new party...") : "Loading parties..."}
+                        className="w-full pl-9 pr-10 py-2.5 text-sm border-2 border-gray-300 rounded-lg focus:outline-none focus:border-brand-500 bg-white"
+                      />
+                      {customerSearch && (
+                        <button
+                          type="button"
+                          onClick={() => { setCustomerSearch(""); setCustomerHighlight(0); }}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 text-gray-400 hover:text-gray-700"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Dropdown list */}
+                    {customerDropdownOpen && (
+                      <div className="absolute z-20 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-72 overflow-y-auto">
+                        {filtered.length === 0 && !showCreateRow && (
+                          <div className="px-4 py-6 text-center">
+                            <Building2 className="w-6 h-6 text-gray-300 mx-auto mb-1.5" />
+                            <p className="text-sm text-gray-500">
+                              {customersLoaded ? (customers.length === 0 ? "No parties yet" : "No matching parties") : "Loading..."}
+                            </p>
+                            {customersLoaded && customers.length > 0 && (
+                              <p className="text-xs text-gray-400 mt-0.5">Type to filter or create new</p>
+                            )}
+                          </div>
+                        )}
+                        {filtered.map((c, idx) => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onMouseEnter={() => setCustomerHighlight(idx)}
+                            onClick={() => { setIsDirty(true); setCustomerId(c.id); setCustomerDropdownOpen(false); setCustomerSearch(""); }}
+                            className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors ${
+                              idx === customerHighlight ? "bg-brand-50" : "hover:bg-gray-50"
+                            }`}
+                          >
+                            <div className="w-8 h-8 rounded-full bg-gray-100 text-gray-700 flex items-center justify-center text-xs font-bold shrink-0">
+                              {c.partyName.charAt(0).toUpperCase()}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-gray-900 truncate">{c.partyName}</p>
+                              {c.location && (
+                                <p className="text-xs text-gray-500 truncate flex items-center gap-1">
+                                  <MapPin className="w-3 h-3" />{c.location}
+                                </p>
+                              )}
+                            </div>
+                            {c.id === customerId && <Check className="w-4 h-4 text-brand-500 shrink-0" />}
+                          </button>
+                        ))}
+                        {showCreateRow && (
+                          <button
+                            type="button"
+                            onMouseEnter={() => setCustomerHighlight(filtered.length)}
+                            onClick={() => { setNewPartyName(customerSearch.trim()); setShowNewParty(true); setCustomerDropdownOpen(false); }}
+                            className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left border-t border-gray-100 transition-colors ${
+                              customerHighlight === filtered.length ? "bg-brand-50" : "hover:bg-gray-50"
+                            }`}
+                          >
+                            <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center shrink-0">
+                              <UserPlus className="w-4 h-4" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-brand-700 truncate">Add new: <span className="font-bold">&ldquo;{customerSearch.trim()}&rdquo;</span></p>
+                              <p className="text-xs text-gray-500">Create as a new party</p>
+                            </div>
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+                {/* Quick "Add new" shortcut when nothing typed */}
+                {!selected && !customerSearch && !customerDropdownOpen && (
+                  <button
+                    type="button"
+                    onClick={() => setShowNewParty(true)}
+                    className="mt-2 inline-flex items-center gap-1.5 text-xs text-brand-600 hover:text-brand-700 font-medium"
+                  >
+                    <UserPlus className="w-3.5 h-3.5" />
+                    {t("newOrder.addNewParty")}
+                  </button>
+                )}
+              </div>
+            );
+          })() : (
+            <div className="space-y-2.5 bg-brand-50/40 border border-brand-100 rounded-lg p-3">
+              <div className="flex items-center gap-2 text-xs text-brand-700 font-semibold mb-1">
+                <UserPlus className="w-3.5 h-3.5" />
+                Add a new party
+              </div>
+              <div className="relative">
+                <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                <input
+                  type="text"
+                  value={newPartyName}
+                  onChange={(e) => setNewPartyName(e.target.value)}
+                  placeholder={t("newOrder.enterPartyName")}
+                  autoFocus
+                  className="w-full pl-9 pr-3 py-2.5 text-sm border-2 border-gray-300 rounded-lg focus:outline-none focus:border-brand-500 bg-white"
+                />
+              </div>
+              <div className="relative">
+                <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
                 <input
                   type="text"
                   value={newPartyLocation}
                   onChange={(e) => setNewPartyLocation(e.target.value)}
                   placeholder={t("newOrder.locationOptional")}
-                  className="flex-1 px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  className="w-full pl-9 pr-3 py-2.5 text-sm border-2 border-gray-300 rounded-lg focus:outline-none focus:border-brand-500 bg-white"
                 />
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => { setShowNewParty(false); setNewPartyName(""); setNewPartyLocation(""); }}
+                  className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-white transition-colors"
+                >
+                  {t("newOrder.backToList")}
+                </button>
                 <button
                   type="button"
                   onClick={handleCreateCustomer}
-                  className="px-4 py-2.5 bg-brand-500 text-white text-sm rounded-lg hover:bg-brand-600 transition-colors"
+                  disabled={!newPartyName.trim()}
+                  className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 bg-brand-500 text-white text-sm font-medium rounded-lg hover:bg-brand-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
+                  <Plus className="w-4 h-4" />
                   {t("newOrder.add")}
                 </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setShowNewParty(false)}
-                className="text-sm text-gray-500 hover:text-gray-700"
-              >
-                {t("newOrder.backToList")}
-              </button>
             </div>
           )}
         </div>
@@ -558,7 +743,7 @@ export default function NewOrderPage() {
                       {t("newOrder.productCategory")}
                     </label>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                      {PRODUCT_CATEGORIES.map((cat) => (
+                      {visibleBuiltins.map((cat) => (
                         <button
                           key={cat.value}
                           type="button"
@@ -576,7 +761,7 @@ export default function NewOrderPage() {
                               : "border-gray-200 text-gray-600 hover:border-gray-300"
                           }`}
                         >
-                          {tProduct(cat.value)}
+                          {builtinLabelFor(cat.value)}
                         </button>
                       ))}
                       {customCategories.map((cat) => (
@@ -795,5 +980,18 @@ export default function NewOrderPage() {
         </button>
       </form>
     </div>
+  );
+}
+
+export default function NewOrderPage() {
+  return (
+    <Suspense fallback={
+      <div className="space-y-4 max-w-2xl mx-auto">
+        <div className="h-8 w-32 bg-gray-200 rounded animate-pulse" />
+        <div className="h-64 bg-gray-200 rounded-xl animate-pulse" />
+      </div>
+    }>
+      <NewOrderPageContent />
+    </Suspense>
   );
 }

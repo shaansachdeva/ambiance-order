@@ -36,12 +36,17 @@ export async function GET(request: Request) {
       };
     }
 
-    if (search) {
+    const searchTerm = search?.trim();
+    if (searchTerm) {
+      const isPostgres = process.env.DB_PROVIDER === "postgres";
+      const mk = (v: string) => (isPostgres ? { contains: v, mode: "insensitive" as const } : { contains: v });
       whereClause.OR = [
-        { companyName: { contains: search } },
-        { remarks: { contains: search } },
-        { contacts: { some: { name: { contains: search } } } },
-        { contacts: { some: { phone: { contains: search } } } },
+        { companyName: mk(searchTerm) },
+        { remarks: mk(searchTerm) },
+        { location: mk(searchTerm) },
+        { contacts: { some: { name: mk(searchTerm) } } },
+        { contacts: { some: { phone: mk(searchTerm) } } },
+        { contacts: { some: { email: mk(searchTerm) } } },
       ];
     }
 
@@ -72,7 +77,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { companyName, remarks, contacts, items, nextFollowUp, visitLatitude, visitLongitude } = body;
+    const { companyName, location, remarks, contacts, items, nextFollowUp, visitLatitude, visitLongitude } = body;
 
     if (!companyName) {
       return NextResponse.json({ error: "Company name is required" }, { status: 400 });
@@ -81,6 +86,7 @@ export async function POST(request: Request) {
     const lead = await prisma.lead.create({
       data: {
         companyName,
+        location: location?.trim() || null,
         remarks,
         nextFollowUp: nextFollowUp ? new Date(nextFollowUp) : null,
         salesPersonId: (session.user as any).id,

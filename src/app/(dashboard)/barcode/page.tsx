@@ -427,8 +427,8 @@ export default function BarcodePage() {
 
       const itemsHtml = images.flatMap(img =>
         Array.from({ length: img.copies }, () =>
-          `<div style="width:${img.widthMm}mm;height:${img.heightMm}mm;page-break-after:always;page-break-inside:avoid;overflow:hidden;">
-            <img src="${img.dataUrl}" style="width:100%;height:100%;object-fit:fill;display:block;" />
+          `<div class="lbl" style="width:${img.widthMm}mm;height:${img.heightMm}mm;">
+            <img src="${img.dataUrl}" />
           </div>`
         )
       ).join("\n");
@@ -436,17 +436,30 @@ export default function BarcodePage() {
       win.document.write(`<!DOCTYPE html><html><head><title>Labels</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
-body{background:#fff;}
-img{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+html,body{background:#fff;margin:0;padding:0;}
+.lbl{page-break-after:always;page-break-inside:avoid;overflow:hidden;}
+.lbl img{width:100%;height:100%;object-fit:fill;display:block;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
 @media print{${pageCss}}
 </style></head><body>
 ${itemsHtml}
-<script>window.onload=function(){setTimeout(function(){window.print();window.onafterprint=function(){window.close();};},300);};${"<"}/script>
+<script>
+(function(){
+  var imgs = Array.prototype.slice.call(document.images);
+  Promise.all(imgs.map(function(i){
+    if (i.complete && i.naturalWidth > 0) return Promise.resolve();
+    return new Promise(function(res){ i.onload = res; i.onerror = res; });
+  })).then(function(){
+    window.focus();
+    try { window.print(); } catch(e){ document.title = 'Print error: ' + e.message; }
+    window.onafterprint = function(){ window.close(); };
+  });
+})();
+${"<"}/script>
 </body></html>`);
       win.document.close();
     } catch (err) {
       console.error("Print error:", err);
-      toast.error("Print failed — check console for details");
+      toast.error("Print failed: " + (err instanceof Error ? err.message : String(err)));
     }
     setPrinting(false);
   }, [labels, labelPrinterMode]);

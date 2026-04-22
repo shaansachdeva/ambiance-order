@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { authOptions, invalidateUserSessionCache } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 
@@ -82,6 +82,9 @@ export async function PATCH(
         updatedAt: true,
       },
     });
+
+    // Permission/role changes must take effect immediately, not after 30s cache expiry
+    invalidateUserSessionCache(params.id);
 
     return NextResponse.json(user);
   } catch (error) {

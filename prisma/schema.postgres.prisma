@@ -174,6 +174,7 @@ model StockLog {
 model Lead {
   id            String    @id @default(cuid())
   companyName   String
+  location      String?   // Address / city where the company is located
   remarks       String?
   status        String    @default("NEW") // NEW, FOLLOW_UP, CONVERTED, CLOSED_LOST
   closeReason   String?
@@ -234,6 +235,13 @@ model CustomProductCategory {
   fields    String   // JSON: array of field names for data entry
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
+}
+
+// Admin overrides for the 5 hardcoded built-in categories (hide or rename)
+model BuiltinCategoryOverride {
+  key    String  @id // "BOPP_TAPE", "BOPP_JUMBO", "THERMAL_ROLL", "BARCODE_LABEL", "COMPUTER_STATIONERY"
+  hidden Boolean @default(false)
+  label  String? // override display name; null = use default
 }
 
 // ─── Quotations ────────────────────────────────────────────────────────────────

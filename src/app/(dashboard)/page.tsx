@@ -7,7 +7,7 @@ import OrderCard from "@/components/OrderCard";
 import { formatDate, hasPermission, safeParseJSON } from "@/lib/utils";
 import { useLanguage } from "@/contexts/LanguageContext";
 import type { UserRole } from "@/types";
-import { AlertTriangle, TrendingUp, Columns3, ArrowRight } from "lucide-react";
+import { AlertTriangle, TrendingUp, Columns3, ArrowRight, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 
 interface DashboardData {
@@ -17,6 +17,7 @@ interface DashboardData {
   readyForDispatch: number;
   dispatched: number;
   rawMaterialNA: number;
+  pendingApprovals: number;
   recentOrders: any[];
   productWiseCounts: { productCategory: string; count: number }[];
   delayedOrders: any[];
@@ -88,6 +89,23 @@ export default function DashboardPage() {
           </Link>
         )}
       </div>
+
+      {/* Pending Approvals Banner (Admin only) */}
+      {userRole === "ADMIN" && data.pendingApprovals > 0 && (
+        <Link
+          href="/pending-approvals"
+          className="flex items-center gap-3 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl hover:bg-amber-100 transition-colors"
+        >
+          <ShieldCheck className="w-5 h-5 text-amber-500 flex-shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-amber-700">
+              {data.pendingApprovals} order{data.pendingApprovals !== 1 ? "s" : ""} awaiting your confirmation
+            </p>
+            <p className="text-xs text-amber-600">Submitted by sales team — tap to review</p>
+          </div>
+          <ArrowRight className="w-4 h-4 text-amber-500" />
+        </Link>
+      )}
 
       {/* Stats */}
       <DashboardStats

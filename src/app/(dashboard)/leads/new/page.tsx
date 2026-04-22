@@ -56,6 +56,7 @@ export default function NewLeadPage() {
   const { t } = useLanguage();
   const [submitting, setSubmitting] = useState(false);
   const [companyName, setCompanyName] = useState("");
+  const [location, setLocation] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, boolean>>({});
   const [remarks, setRemarks] = useState("");
   const [nextFollowUp, setNextFollowUp] = useState("");
@@ -147,6 +148,7 @@ export default function NewLeadPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           companyName,
+          location,
           remarks,
           nextFollowUp,
           visitLatitude: visitLocation?.lat ?? null,
@@ -171,9 +173,17 @@ export default function NewLeadPage() {
       if (res.ok) {
         // Upload visit photo if provided
         if (visitPhoto) {
-          const formData = new FormData();
-          formData.append("photo", visitPhoto);
-          await fetch(`/api/leads/${data.id}/photo`, { method: "POST", body: formData });
+          try {
+            const formData = new FormData();
+            formData.append("photo", visitPhoto);
+            const photoRes = await fetch(`/api/leads/${data.id}/photo`, { method: "POST", body: formData });
+            if (!photoRes.ok) {
+              const pdata = await photoRes.json().catch(() => ({}));
+              toast.error(`Photo upload failed: ${pdata.error || photoRes.statusText}`);
+            }
+          } catch (err) {
+            toast.error("Photo upload failed — please retry from the lead page");
+          }
         }
         toast.success("Lead created successfully");
         router.push(`/leads/${data.id}`);
@@ -214,27 +224,45 @@ export default function NewLeadPage() {
         {/* Basic Info */}
         <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-6 shadow-sm">
           <h2 className="text-lg font-semibold text-gray-900 mb-2">{t("leads.basicInfo")}</h2>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              {t("leads.companyName")}
-              <span className="text-red-500 ml-1">*</span>
-            </label>
-            <input
-              type="text"
-              value={companyName}
-              onChange={(e) => { setCompanyName(e.target.value); if (e.target.value.trim()) setFieldErrors(p => ({ ...p, companyName: false })); }}
-              className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 ${
-                fieldErrors.companyName
-                  ? "border-red-400 bg-red-50 focus:ring-red-400 focus:border-red-400"
-                  : "border-gray-300 focus:ring-brand-500"
-              }`}
-              placeholder="e.g. Acme Corp"
-            />
-            {fieldErrors.companyName && (
-              <p className="mt-1 text-xs text-red-600 flex items-center gap-1">
-                <AlertCircle className="w-3 h-3" /> Company name is required
-              </p>
-            )}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                {t("leads.companyName")}
+                <span className="text-red-500 ml-1">*</span>
+              </label>
+              <input
+                type="text"
+                value={companyName}
+                onChange={(e) => { setCompanyName(e.target.value); if (e.target.value.trim()) setFieldErrors(p => ({ ...p, companyName: false })); }}
+                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 ${
+                  fieldErrors.companyName
+                    ? "border-red-400 bg-red-50 focus:ring-red-400 focus:border-red-400"
+                    : "border-gray-300 focus:ring-brand-500"
+                }`}
+                placeholder="e.g. Acme Corp"
+              />
+              {fieldErrors.companyName && (
+                <p className="mt-1 text-xs text-red-600 flex items-center gap-1">
+                  <AlertCircle className="w-3 h-3" /> Company name is required
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Location <span className="text-gray-400 font-normal">(city / address)</span>
+              </label>
+              <div className="relative">
+                <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  type="text"
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  placeholder="e.g. Andheri, Mumbai"
+                />
+              </div>
+            </div>
           </div>
 
           <div className="space-y-3">

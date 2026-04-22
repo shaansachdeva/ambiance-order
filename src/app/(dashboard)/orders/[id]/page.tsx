@@ -46,6 +46,7 @@ import {
   PackageCheck,
   ChevronRight,
   Tag,
+  Plus,
 } from "lucide-react";
 import Link from "next/link";
 import OrderLabelModal from "@/components/OrderLabelModal";
@@ -58,14 +59,14 @@ const STATUS_BUTTONS: {
   status: OrderStatus;
   labelKey: TranslationKey;
   style: string;
-  icon: React.ReactNode;
+  Icon: React.ComponentType<{ className?: string }>;
   roles: string[];
 }[] = [
-  { status: "CONFIRMED", labelKey: "orderDetail.confirm", style: "border-purple-300 text-purple-700 bg-purple-50 hover:bg-purple-600 hover:text-white hover:border-purple-600", icon: <BadgeCheck className="w-3.5 h-3.5" />, roles: ["ADMIN", "PRODUCTION", "ACCOUNTANT"] },
-  { status: "IN_PRODUCTION", labelKey: "orderDetail.inProduction", style: "border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-500 hover:text-white hover:border-amber-500", icon: <Cog className="w-3.5 h-3.5" />, roles: ["ADMIN", "PRODUCTION", "ACCOUNTANT"] },
-  { status: "RAW_MATERIAL_NA", labelKey: "orderDetail.rawMaterialNA", style: "border-red-300 text-red-700 bg-red-50 hover:bg-red-500 hover:text-white hover:border-red-500", icon: <AlertTriangle className="w-3.5 h-3.5" />, roles: ["ADMIN", "PRODUCTION", "ACCOUNTANT"] },
-  { status: "READY_FOR_DISPATCH", labelKey: "orderDetail.readyForDispatch", style: "border-green-300 text-green-700 bg-green-50 hover:bg-green-600 hover:text-white hover:border-green-600", icon: <PackageCheck className="w-3.5 h-3.5" />, roles: ["ADMIN", "PRODUCTION", "ACCOUNTANT"] },
-  { status: "DISPATCHED", labelKey: "orderDetail.dispatched", style: "border-gray-300 text-gray-700 bg-gray-50 hover:bg-gray-600 hover:text-white hover:border-gray-600", icon: <Truck className="w-3.5 h-3.5" />, roles: ["ADMIN", "DISPATCH"] },
+  { status: "CONFIRMED", labelKey: "orderDetail.confirm", style: "border-purple-300 text-purple-700 bg-purple-50 hover:bg-purple-600 hover:text-white hover:border-purple-600", Icon: BadgeCheck, roles: ["ADMIN", "PRODUCTION", "ACCOUNTANT"] },
+  { status: "IN_PRODUCTION", labelKey: "orderDetail.inProduction", style: "border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-500 hover:text-white hover:border-amber-500", Icon: Cog, roles: ["ADMIN", "PRODUCTION", "ACCOUNTANT"] },
+  { status: "RAW_MATERIAL_NA", labelKey: "orderDetail.rawMaterialNA", style: "border-red-300 text-red-700 bg-red-50 hover:bg-red-500 hover:text-white hover:border-red-500", Icon: AlertTriangle, roles: ["ADMIN", "PRODUCTION", "ACCOUNTANT"] },
+  { status: "READY_FOR_DISPATCH", labelKey: "orderDetail.readyForDispatch", style: "border-green-300 text-green-700 bg-green-50 hover:bg-green-600 hover:text-white hover:border-green-600", Icon: PackageCheck, roles: ["ADMIN", "PRODUCTION", "ACCOUNTANT"] },
+  { status: "DISPATCHED", labelKey: "orderDetail.dispatched", style: "border-gray-300 text-gray-700 bg-gray-50 hover:bg-gray-600 hover:text-white hover:border-gray-600", Icon: Truck, roles: ["ADMIN", "DISPATCH"] },
 ];
 
 export default function OrderDetailPage() {
@@ -111,26 +112,41 @@ export default function OrderDetailPage() {
   // Label print modal
   const [showLabelModal, setShowLabelModal] = useState(false);
 
+  // Add item modal
+  const [showAddItemModal, setShowAddItemModal] = useState(false);
+  const [newItemCategory, setNewItemCategory] = useState<ProductCategory>("BOPP_TAPE");
+  const [newItemDetails, setNewItemDetails] = useState<Record<string, string>>({});
+  const [newItemRate, setNewItemRate] = useState("");
+  const [addingItem, setAddingItem] = useState(false);
+
   const { t, tStatus, tProduct } = useLanguage();
 
-  const userRole = ((session?.user as any)?.role || "SALES") as UserRole;
+  // Real role from session — may be undefined while loading or when session has expired.
+  // Do NOT fall back to "SALES" as the default, otherwise an expired session flips
+  // the page into SALES mode (showing the rate-save input instead of status buttons).
+  const sessionRole = (session?.user as any)?.role as UserRole | undefined;
+  const userRole = (sessionRole || "SALES") as UserRole;
   const customPermissions = (session?.user as any)?.customPermissions ?? null;
 
-  // Only treat as "loading" when we have no session data at all.
-  // If session data exists (even during a background refetch) use it directly —
-  // this prevents the status-buttons from disappearing on page refresh.
-  const isSessionLoading = !session && sessionStatus === "loading";
-  const showParty = !isSessionLoading && hasPermission(userRole, "view_party", customPermissions);
-  const canUpdateStatus = !isSessionLoading && hasPermission(userRole, "update_status", customPermissions);
-  const canEditOrder = !isSessionLoading && (userRole === "ADMIN" || userRole === "ACCOUNTANT" || userRole === "SALES");
-  const canEditJumbo = !isSessionLoading && (userRole === "PRODUCTION" || userRole === "ADMIN" || userRole === "ACCOUNTANT");
-  const canEditChallan = !isSessionLoading && (userRole === "DISPATCH" || userRole === "ACCOUNTANT" || userRole === "ADMIN");
-  const canEditStages = !isSessionLoading && (userRole === "PRODUCTION" || userRole === "ADMIN" || userRole === "ACCOUNTANT");
-  const canPrintLabel = !isSessionLoading && (userRole === "ADMIN" || userRole === "ACCOUNTANT");
+  // Role-gated UI must not render until we actually have the role from the session.
+  // If the session is genuinely expired, the API fetches will return 401 and the page
+  // will show the "not found" state — we do NOT force a client-side redirect here,
+  // since NextAuth's `status` can flicker to "unauthenticated" during hydration and
+  // a forced redirect causes a /login bounce loop.
+  const roleKnown = !!sessionRole;
+  const showParty = roleKnown && hasPermission(userRole, "view_party", customPermissions);
+  const canUpdateStatus = roleKnown && hasPermission(userRole, "update_status", customPermissions);
+  const canEditOrder = roleKnown && (userRole === "ADMIN" || userRole === "ACCOUNTANT" || userRole === "SALES");
+  const canEditJumbo = roleKnown && (userRole === "PRODUCTION" || userRole === "ADMIN" || userRole === "ACCOUNTANT");
+  const canEditChallan = roleKnown && (userRole === "DISPATCH" || userRole === "ACCOUNTANT" || userRole === "ADMIN");
+  const canEditStages = roleKnown && (userRole === "PRODUCTION" || userRole === "ADMIN" || userRole === "ACCOUNTANT");
+  const canPrintLabel = roleKnown && (userRole === "ADMIN" || userRole === "ACCOUNTANT");
+  const canShowRateInput = roleKnown && sessionRole === "SALES"; // gate the rate-save input strictly
 
   const fetchOrder = () => {
-    // Disable cache to ensure we get the fresh order immediately after creation
-    fetch(`/api/orders/${id}`, { cache: 'no-store' })
+    if (!id) return;
+    const orderId = Array.isArray(id) ? id[0] : String(id);
+    fetch(`/api/orders/${orderId}`, { cache: 'no-store' })
       .then(async (res) => {
         const data = await res.json();
         if (!res.ok) {
@@ -138,7 +154,7 @@ export default function OrderDetailPage() {
           setLoading(false);
           return;
         }
-        
+
         setOrder(data);
         setEditRemarks(data.remarks || "");
         setEditDeadline(
@@ -148,7 +164,6 @@ export default function OrderDetailPage() {
         );
         setEditJumboCode(data.jumboCode || "");
         setEditChallan(data.challanNumber || "");
-        // Init per-item jumbo codes, extra boxes and extra rolls for BOPP_TAPE items
         const codes: Record<string, string> = {};
         const boxes: Record<string, string> = {};
         const rolls: Record<string, string> = {};
@@ -171,14 +186,58 @@ export default function OrderDetailPage() {
         setLoading(false);
       })
       .catch((err) => {
-        console.error("Fetch error:", err);
+        console.error("[OrderDetail] Fetch error:", err);
         setOrder({ error: "Network error or failed to parse response" });
         setLoading(false);
       });
   };
 
   useEffect(() => {
-    fetchOrder();
+    if (!id) return;
+    const orderId = Array.isArray(id) ? id[0] : String(id);
+    fetch(`/api/orders/${orderId}`, { cache: 'no-store' })
+      .then(async (res) => {
+        const data = await res.json();
+        if (!res.ok) {
+          setOrder({ error: data.error || "Failed to load order" });
+          setLoading(false);
+          return;
+        }
+        setOrder(data);
+        setEditRemarks(data.remarks || "");
+        setEditDeadline(
+          data.deliveryDeadline
+            ? new Date(data.deliveryDeadline).toISOString().split("T")[0]
+            : ""
+        );
+        setEditJumboCode(data.jumboCode || "");
+        setEditChallan(data.challanNumber || "");
+        const codes: Record<string, string> = {};
+        const boxes: Record<string, string> = {};
+        const rolls: Record<string, string> = {};
+        for (const item of data.items || []) {
+          if (item.productCategory === "BOPP_TAPE") {
+            const d = safeParseJSON(item.productDetails);
+            codes[item.id] = d.jumboCode || "";
+            rolls[item.id] = d.extraRolls || "";
+            boxes[item.id] = d.extraBoxes || "";
+          }
+        }
+        const rates: Record<string, string> = {};
+        for (const item of data.items || []) {
+          rates[item.id] = item.rate != null ? String(item.rate) : "";
+        }
+        setItemJumboCodes(codes);
+        setItemExtraBoxes(boxes);
+        setItemExtraRolls(rolls);
+        setItemRates(rates);
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error("[OrderDetail] Fetch error:", err);
+        setOrder({ error: "Network error or failed to parse response" });
+        setLoading(false);
+      });
   }, [id]);
 
   const handleStatusUpdate = async (newStatus: string, notes?: string) => {
@@ -245,10 +304,10 @@ export default function OrderDetailPage() {
   const handleContinueToProduction = async () => {
     setUpdatingStatus("order-continue");
     try {
-      const res = await fetch(`/api/orders/${id}`, {
+      const res = await fetch(`/api/orders/${id}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "IN_PRODUCTION" }),
+        body: JSON.stringify({ status: "IN_PRODUCTION", notes: "Continued to production after material resolved" }),
       });
       if (res.ok) {
         toast.success(t("orderDetail.statusUpdated"));
@@ -376,7 +435,7 @@ export default function OrderDetailPage() {
           </div>
         </div>
       ),
-      { duration: 8000 }
+      { duration: Infinity }
     );
   };
 
@@ -399,7 +458,7 @@ export default function OrderDetailPage() {
           </div>
         </div>
       ),
-      { duration: 8000 }
+      { duration: Infinity }
     );
   };
 
@@ -525,6 +584,45 @@ export default function OrderDetailPage() {
       toast.error(t("common.error"));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleAddItem = async () => {
+    setAddingItem(true);
+    try {
+      const existingItems = (order.items || []).map((item: any) => ({
+        dbId: item.id,
+        productCategory: item.productCategory,
+        productDetails: item.productDetails,
+        rate: item.rate,
+        gst: item.gst,
+      }));
+      const newItem = {
+        productCategory: newItemCategory,
+        productDetails: newItemDetails,
+        rate: newItemRate ? parseFloat(newItemRate) : null,
+        gst: null,
+      };
+      const res = await fetch(`/api/orders/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: [...existingItems, newItem] }),
+      });
+      if (res.ok) {
+        toast.success("Product added to order");
+        setShowAddItemModal(false);
+        setNewItemCategory("BOPP_TAPE");
+        setNewItemDetails({});
+        setNewItemRate("");
+        fetchOrder();
+      } else {
+        const data = await res.json();
+        toast.error(data.error || "Failed to add product");
+      }
+    } catch {
+      toast.error("Something went wrong");
+    } finally {
+      setAddingItem(false);
     }
   };
 
@@ -715,6 +813,36 @@ export default function OrderDetailPage() {
         )}
       </div>
 
+      {/* Pending Confirmation Banner */}
+      {order.status === "PENDING_CONFIRMATION" && (
+        <div className="flex items-center gap-2 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl">
+          <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-amber-700">Awaiting Admin Confirmation</p>
+            <p className="text-xs text-amber-600">This order was submitted by the sales team and is waiting for admin approval.</p>
+          </div>
+          {userRole === "ADMIN" && (
+            <Link
+              href="/pending-approvals"
+              className="px-3 py-1.5 bg-amber-500 text-white text-xs font-medium rounded-lg hover:bg-amber-600 transition-colors shrink-0"
+            >
+              Review
+            </Link>
+          )}
+        </div>
+      )}
+
+      {/* Rejected Banner */}
+      {order.status === "REJECTED" && (
+        <div className="flex items-center gap-2 px-4 py-3 bg-red-50 border border-red-200 rounded-xl">
+          <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0" />
+          <div>
+            <p className="text-sm font-semibold text-red-700">Order Rejected</p>
+            <p className="text-xs text-red-600">This order was rejected by the admin. Please contact the admin for details.</p>
+          </div>
+        </div>
+      )}
+
       {/* Overdue Alert */}
       {isOverdue && (
         <div className="flex items-center gap-2 px-4 py-3 bg-red-50 border border-red-200 rounded-xl">
@@ -805,9 +933,20 @@ export default function OrderDetailPage() {
 
       {/* Order Items (multi-item) */}
       <div className="bg-white rounded-xl border border-gray-200 p-4">
-        <h2 className="text-sm font-semibold text-gray-900 mb-3">
-          {t("orderDetail.orderItems")} ({orderItems.length})
-        </h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-gray-900">
+            {t("orderDetail.orderItems")} ({orderItems.length})
+          </h2>
+          {(userRole === "ADMIN" || userRole === "ACCOUNTANT") && order.status !== "DISPATCHED" && (
+            <button
+              onClick={() => { setNewItemDetails({}); setShowAddItemModal(true); }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-brand-50 border border-brand-200 rounded-lg text-xs font-medium text-brand-700 hover:bg-brand-100 transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add Product
+            </button>
+          )}
+        </div>
 
         {/* Fallback for legacy single-product orders (no items) */}
         {orderItems.length === 0 && order.productCategory && (
@@ -899,7 +1038,7 @@ export default function OrderDetailPage() {
                       </div>
                     );
                   })}
-                  {userRole === "SALES" ? (
+                  {canShowRateInput ? (
                     <div className="text-xs col-span-2 sm:col-span-1">
                       <span className="text-gray-500 block mb-0.5">{t("challan.rate")} (₹)</span>
                       <div className="flex items-center gap-1.5">
@@ -1004,7 +1143,7 @@ export default function OrderDetailPage() {
                             {isUpdating ? (
                               <Cog className="w-3.5 h-3.5 animate-spin" />
                             ) : (
-                              btn.icon
+                              <btn.Icon className="w-3.5 h-3.5" />
                             )}
                             {isUpdating ? "..." : t(btn.labelKey)}
                             {!isUpdating && <ChevronRight className="w-3 h-3 opacity-60" />}
@@ -1378,6 +1517,90 @@ export default function OrderDetailPage() {
       {/* Print Label Modal */}
       {showLabelModal && order && (
         <OrderLabelModal order={order} onClose={() => setShowLabelModal(false)} />
+      )}
+
+      {/* Add Item Modal */}
+      {showAddItemModal && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 px-4 pb-4 sm:pb-0">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-gray-100">
+              <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                <Plus className="w-4 h-4 text-brand-500" />
+                Add Product to Order
+              </h3>
+              <button onClick={() => setShowAddItemModal(false)} className="p-1 text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              {/* Category selector */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Product Category</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {PRODUCT_CATEGORIES.map((cat) => (
+                    <button
+                      key={cat.value}
+                      type="button"
+                      onClick={() => { setNewItemCategory(cat.value); setNewItemDetails({}); }}
+                      className={`px-3 py-2 text-sm rounded-lg border-2 font-medium transition-all ${
+                        newItemCategory === cat.value
+                          ? "border-brand-500 bg-brand-50 text-brand-700"
+                          : "border-gray-200 text-gray-600 hover:border-gray-300"
+                      }`}
+                    >
+                      {tProduct(cat.value)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {/* Product details form */}
+              <ProductForm
+                productCategory={newItemCategory}
+                productDetails={newItemDetails}
+                onChange={(details) => setNewItemDetails(details)}
+              />
+              {/* Rate */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  Rate (₹) <span className="text-gray-400 font-normal">(optional)</span>
+                </label>
+                <div className="relative">
+                  <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    type="number"
+                    value={newItemRate}
+                    onChange={(e) => setNewItemRate(e.target.value)}
+                    placeholder="0"
+                    className="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2 px-5 pb-5">
+              <button
+                onClick={() => setShowAddItemModal(false)}
+                className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAddItem}
+                disabled={addingItem}
+                className="flex-1 px-4 py-2.5 bg-brand-500 text-white text-sm font-medium rounded-lg hover:bg-brand-600 disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {addingItem ? (
+                  <svg className="animate-spin h-4 w-4 text-white" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                ) : (
+                  <Plus className="w-4 h-4" />
+                )}
+                {addingItem ? "Adding..." : "Add Product"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Raw Material N/A Modal */}

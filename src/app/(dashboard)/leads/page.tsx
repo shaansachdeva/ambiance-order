@@ -119,7 +119,8 @@ export default function LeadsPage() {
   const fetchLeads = () => {
     setLoading(true);
     const params = new URLSearchParams();
-    if (debouncedSearch) params.set("search", debouncedSearch);
+    const trimmed = debouncedSearch.trim();
+    if (trimmed) params.set("search", trimmed);
     if (userRole === "ADMIN" && filterSalesPerson !== "all") {
       params.set("salesPersonId", filterSalesPerson);
     }
@@ -453,6 +454,10 @@ export default function LeadsPage() {
                         {t("leads.followUpLabel")} {format(new Date(lead.nextFollowUp), "MMM d, yyyy")}
                       </span>
                     )}
+                    <span className="flex items-center gap-1.5 text-gray-400">
+                      <Calendar className="w-3.5 h-3.5" />
+                      {format(new Date(lead.createdAt), "MMM d, yyyy")}
+                    </span>
                     {userRole === "ADMIN" && lead.salesPerson && (
                       <span className="flex items-center gap-1.5 text-gray-400">
                         <Users className="w-3.5 h-3.5" />

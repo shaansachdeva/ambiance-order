@@ -35,9 +35,10 @@ export default async function RootLayout({
   return (
     <html lang="en">
       <body className={`${inter.variable} font-sans antialiased`}>
-        {/* refetchOnWindowFocus ensures permissions saved by admin take effect
-            the next time the affected user brings the tab into focus */}
-        <SessionProvider session={session} refetchOnWindowFocus refetchInterval={300}>
+        {/* Session is refetched on window focus (so admin permission changes take
+            effect when the user returns to the tab) and every 15 min as a fallback.
+            The session callback caches DB lookups for 30s, so this is cheap. */}
+        <SessionProvider session={session} refetchOnWindowFocus refetchInterval={900}>
           <LanguageProvider>{children}</LanguageProvider>
         </SessionProvider>
       </body>

@@ -15,7 +15,6 @@ export async function GET(
   const userRole = (session.user as any).role;
 
   const idParam = String(params.id);
-  console.log(`[API] Fetching order with ID param: "${idParam}"`);
 
   // Search for the order by internal ID (cuid) first
   let order = await prisma.order.findFirst({
@@ -27,9 +26,7 @@ export async function GET(
   });
 
   if (order) {
-    console.log(`[API] Found order by cuid: ${order.orderId}, deletedAt: ${order.deletedAt}`);
     if (order.deletedAt !== null) {
-      console.warn(`[API] Order ${idParam} is soft-deleted`);
       return NextResponse.json({ error: "This order is in the recycle bin" }, { status: 404 });
     }
   } else {
@@ -41,20 +38,12 @@ export async function GET(
         items: true,
       }
     });
-    if (order) {
-      console.log(`[API] Found order by orderId: ${order.id}, deletedAt: ${order.deletedAt}`);
-      if (order.deletedAt !== null) {
-        return NextResponse.json({ error: "This order is in the recycle bin" }, { status: 404 });
-      }
+    if (order && order.deletedAt !== null) {
+      return NextResponse.json({ error: "This order is in the recycle bin" }, { status: 404 });
     }
   }
 
   if (!order) {
-    console.warn(`[API] Order completely NOT FOUND for param: "${idParam}"`);
-    // Final check: does it exist at all in the DB?
-    const count = await prisma.order.count({ where: { OR: [{id: idParam}, {orderId: idParam}] } });
-    console.log(`[API] Count for this ID in DB: ${count}`);
-    
     return NextResponse.json({ error: `Order not found (ID: ${idParam})` }, { status: 404 });
   }
 

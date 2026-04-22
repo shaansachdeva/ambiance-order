@@ -3,6 +3,18 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { prisma } from "./prisma";
 import { USER_FEATURES } from "@/types";
+import type { UserRole } from "@/types";
+
+// In-memory cache for session DB lookups. Session refetch fires on every
+// window focus + every 5-10min interval per user — without this, a handful
+// of logged-in users can exhaust the pg connection pool.
+const SESSION_CACHE_MS = 30_000;
+type CachedUser = { role: string; customPermissions: string[] | null; expiresAt: number };
+const sessionCache = new Map<string, CachedUser>();
+
+export function invalidateUserSessionCache(userId: string) {
+  sessionCache.delete(userId);
+}
 
 export const authOptions: AuthOptions = {
   providers: [
@@ -38,7 +50,7 @@ export const authOptions: AuthOptions = {
           id: user.id,
           name: user.name,
           email: user.username, // NextAuth expects email field
-          role: user.role,
+          role: user.role as UserRole,
         };
       },
     }),
@@ -55,25 +67,35 @@ export const authOptions: AuthOptions = {
       return token;
     },
     async session({ session, token }) {
-      if (session.user) {
-        (session.user as any).role = token.role;
-        (session.user as any).id = token.id;
-        // Always fetch fresh role and customPermissions from DB so changes take effect immediately
-        try {
-          const dbUser = await prisma.user.findUnique({
-            where: { id: token.id as string },
-            select: { role: true, customPermissions: true },
-          });
-          if (dbUser) {
-            (session.user as any).role = dbUser.role;
-            const raw = dbUser.customPermissions;
-            (session.user as any).customPermissions = raw
-              ? (JSON.parse(raw) as string[])
-              : null;
-          }
-        } catch {
-          (session.user as any).customPermissions = null;
-        }
+      if (!session.user) return session;
+      (session.user as any).role = token.role;
+      (session.user as any).id = token.id;
+
+      const userId = token.id as string | undefined;
+      if (!userId) return session;
+
+      const now = Date.now();
+      const cached = sessionCache.get(userId);
+      if (cached && cached.expiresAt > now) {
+        (session.user as any).role = cached.role;
+        (session.user as any).customPermissions = cached.customPermissions;
+        return session;
+      }
+
+      try {
+        const dbUser = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { role: true, customPermissions: true },
+        });
+        const role = dbUser?.role ?? (token.role as string);
+        const customPermissions = dbUser?.customPermissions
+          ? (JSON.parse(dbUser.customPermissions) as string[])
+          : null;
+        sessionCache.set(userId, { role, customPermissions, expiresAt: now + SESSION_CACHE_MS });
+        (session.user as any).role = role;
+        (session.user as any).customPermissions = customPermissions;
+      } catch {
+        (session.user as any).customPermissions = null;
       }
       return session;
     },

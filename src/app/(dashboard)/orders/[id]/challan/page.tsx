@@ -11,7 +11,6 @@ const COMPANY = {
   name: "Ambiance Printing & Packaging",
   address: "Mandebar Road, Vill. Kheri Rangran, Opposite Bharat Gas Godown, Yamunanagar, Haryana (INDIA) 135001",
   email: "info@pakzy3s.com | ambianceynr@gmail.com",
-  gst: "06AJMPR6054Q1ZC",
 };
 
 /** Returns a human-readable quantity string for a given item */
@@ -111,9 +110,6 @@ export default function ChallanPage() {
                 </h1>
                 <p className="text-gray-700 mt-0.5 leading-snug text-[10px]">{COMPANY.address}</p>
                 <p className="text-gray-700 mt-0.5 text-[10px]">Email: {COMPANY.email}</p>
-                <p className="text-gray-700 mt-0.5 text-[10px]">
-                  <span className="font-semibold">GSTIN:</span> {COMPANY.gst}
-                </p>
               </div>
               <div className="shrink-0">
                 <p className="text-xs font-bold text-black uppercase tracking-wide border border-black px-2 py-1 whitespace-nowrap">

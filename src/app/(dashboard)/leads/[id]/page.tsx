@@ -38,6 +38,7 @@ interface LeadItem {
 interface Lead {
   id: string;
   companyName: string;
+  location: string | null;
   remarks: string | null;
   status: string;
   closeReason: string | null;
@@ -177,8 +178,19 @@ export default function LeadDetailPage() {
           </Link>
           <div>
             <h1 className="text-xl font-bold text-gray-900">{lead.companyName}</h1>
-            <p className="text-sm text-gray-500 flex items-center gap-2">
-              {t("leads.salesRep")} <span className="font-medium text-gray-700">{lead.salesPerson.name}</span>
+            {lead.location && (
+              <p className="text-sm text-gray-600 flex items-center gap-1 mt-0.5">
+                <MapPin className="w-3.5 h-3.5 text-gray-400" />
+                {lead.location}
+              </p>
+            )}
+            <p className="text-sm text-gray-500 flex items-center gap-2 flex-wrap">
+              <span>{t("leads.salesRep")} <span className="font-medium text-gray-700">{lead.salesPerson.name}</span></span>
+              <span className="text-gray-300">•</span>
+              <span className="flex items-center gap-1 text-gray-500">
+                <Calendar className="w-3.5 h-3.5" />
+                {format(new Date(lead.createdAt), "dd MMM yyyy, h:mm a")}
+              </span>
             </p>
           </div>
         </div>

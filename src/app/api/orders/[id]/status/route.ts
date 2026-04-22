@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 const PRODUCTION_ALLOWED_STATUSES = ["CONFIRMED", "IN_PRODUCTION", "RAW_MATERIAL_NA", "READY_FOR_DISPATCH"];
+const ACCOUNTANT_ALLOWED_STATUSES = ["CONFIRMED", "IN_PRODUCTION", "RAW_MATERIAL_NA", "READY_FOR_DISPATCH", "DISPATCHED"];
 const DISPATCH_ALLOWED_STATUSES = ["DISPATCHED"];
 
 export async function PATCH(
@@ -47,6 +48,13 @@ export async function PATCH(
       if (!PRODUCTION_ALLOWED_STATUSES.includes(status)) {
         return NextResponse.json(
           { error: `Production role can only set status to: ${PRODUCTION_ALLOWED_STATUSES.join(", ")}` },
+          { status: 403 }
+        );
+      }
+    } else if (userRole === "ACCOUNTANT") {
+      if (!ACCOUNTANT_ALLOWED_STATUSES.includes(status)) {
+        return NextResponse.json(
+          { error: `Accountant role can only set status to: ${ACCOUNTANT_ALLOWED_STATUSES.join(", ")}` },
           { status: 403 }
         );
       }

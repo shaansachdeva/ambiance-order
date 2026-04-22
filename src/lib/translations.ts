@@ -27,6 +27,7 @@ const translations = {
   "nav.products": { en: "Products", hi: "उत्पाद" },
   "nav.drafts": { en: "Drafts", hi: "ड्राफ्ट" },
   "nav.settings": { en: "Settings", hi: "सेटिंग्स" },
+  "nav.pendingApprovals": { en: "Pending Approvals", hi: "अनुमोदन बाकी" },
   "nav.inventory": { en: "Inventory", hi: "इन्वेंटरी" },
   "nav.menu": { en: "Menu", hi: "मेनू" },
   "nav.logout": { en: "Logout", hi: "लॉग आउट" },
@@ -51,6 +52,8 @@ const translations = {
   "status.RAW_MATERIAL_NA": { en: "Raw Material N/A", hi: "कच्चा माल उपलब्ध नहीं" },
   "status.READY_FOR_DISPATCH": { en: "Ready for Dispatch", hi: "भेजने के लिए तैयार" },
   "status.DISPATCHED": { en: "Dispatched", hi: "भेज दिया गया" },
+  "status.PENDING_CONFIRMATION": { en: "Pending Confirmation", hi: "अनुमोदन बाकी" },
+  "status.REJECTED": { en: "Rejected", hi: "अस्वीकृत" },
 
   // Product Categories
   "product.BOPP_TAPE": { en: "BOPP Tape", hi: "BOPP टेप" },
@@ -521,10 +524,14 @@ export function tStatus(status: string, lang: Language): string {
   return t(key, lang);
 }
 
-// Helper to get translated product category
+// Helper to get translated product category.
+// Custom categories are stored by their display name and have no translation key —
+// fall back to the raw name so users see "Kraft Tape" instead of "product.Kraft Tape".
 export function tProduct(category: string, lang: Language): string {
   const key = `product.${category}` as TranslationKey;
-  return t(key, lang);
+  const entry = translations[key];
+  if (!entry) return category;
+  return entry[lang] || entry.en;
 }
 
 // Helper to get translated role

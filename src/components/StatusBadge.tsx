@@ -2,13 +2,11 @@
 
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/contexts/LanguageContext";
-import type { OrderStatus } from "@/types";
-
 interface StatusBadgeProps {
-  status: OrderStatus;
+  status: string;
 }
 
-const STATUS_STYLES: Record<OrderStatus, { bg: string; text: string; dot: string }> = {
+const STATUS_STYLES: Record<string, { bg: string; text: string; dot: string }> = {
   ORDER_PLACED: {
     bg: "bg-blue-50",
     text: "text-blue-700",
@@ -38,6 +36,16 @@ const STATUS_STYLES: Record<OrderStatus, { bg: string; text: string; dot: string
     bg: "bg-gray-100",
     text: "text-gray-600",
     dot: "bg-gray-400",
+  },
+  PENDING_CONFIRMATION: {
+    bg: "bg-amber-50",
+    text: "text-amber-700",
+    dot: "bg-amber-500",
+  },
+  REJECTED: {
+    bg: "bg-red-100",
+    text: "text-red-800",
+    dot: "bg-red-600",
   },
 };
 

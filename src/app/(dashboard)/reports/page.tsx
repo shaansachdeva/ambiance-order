@@ -39,7 +39,7 @@ export default function ReportsPage() {
 
   useEffect(() => {
     setLoading(true);
-    fetch(`/api/reports?month=${month}&year=${year}`)
+    fetch(`/api/reports?month=${month}&year=${year}`, { cache: "no-store" })
       .then((res) => res.json())
       .then((d) => {
         setData(d);

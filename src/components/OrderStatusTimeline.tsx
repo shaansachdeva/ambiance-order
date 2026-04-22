@@ -18,12 +18,14 @@ interface OrderStatusTimelineProps {
 }
 
 const STATUS_DOT_COLORS: Record<OrderStatus, string> = {
+  PENDING_CONFIRMATION: "bg-amber-500",
   ORDER_PLACED: "bg-blue-500",
   CONFIRMED: "bg-purple-500",
   IN_PRODUCTION: "bg-amber-500",
   RAW_MATERIAL_NA: "bg-red-500",
   READY_FOR_DISPATCH: "bg-green-500",
   DISPATCHED: "bg-gray-400",
+  REJECTED: "bg-red-600",
 };
 
 export default function OrderStatusTimeline({

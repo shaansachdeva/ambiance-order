@@ -38,6 +38,7 @@ const STAT_CARDS: StatCard[] = [
     icon: Package,
     iconColor: "text-brand-600",
     bgColor: "bg-brand-50",
+    href: "/orders",
   },
   {
     labelKey: "dashboard.todaysProduction",

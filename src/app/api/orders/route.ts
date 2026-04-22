@@ -37,6 +37,9 @@ export async function GET(request: NextRequest) {
     andConditions.push({ status: { not: "DISPATCHED" } });
   } else if (status) {
     andConditions.push({ status });
+  } else {
+    // Default list hides REJECTED orders — still viewable via explicit ?status=REJECTED
+    andConditions.push({ status: { not: "REJECTED" } });
   }
 
   if (productCategory) {
@@ -60,6 +63,14 @@ export async function GET(request: NextRequest) {
   // For RAW_MATERIAL_NA queries include item statusLogs so UI can show which material is missing
   const includeItemNotes = status === "RAW_MATERIAL_NA";
 
+  // Pagination — response stays backward compatible (an array) unless ?page= is passed.
+  // Hard cap at 500 rows even without pagination to avoid pulling the entire table.
+  const page = Math.max(1, parseInt(searchParams.get("page") || "0", 10) || 0);
+  const perPage = Math.min(200, Math.max(1, parseInt(searchParams.get("perPage") || "50", 10) || 50));
+  const paginated = page > 0;
+  const take = paginated ? perPage : 500;
+  const skip = paginated ? (page - 1) * perPage : 0;
+
   const orders = await prisma.order.findMany({
     where,
     include: {
@@ -78,6 +89,8 @@ export async function GET(request: NextRequest) {
         : true,
     },
     orderBy: { createdAt: "desc" },
+    take,
+    skip,
   });
 
   if (userRole === "PRODUCTION") {
@@ -117,6 +130,7 @@ export async function POST(request: NextRequest) {
     }
 
     const userId = (session.user as any).id;
+    const userRole = (session.user as any).role;
 
     // Auto-generate orderId — wrapped in transaction for atomicity under concurrent requests
     const counter = await prisma.$transaction(async (tx) => {
@@ -128,6 +142,8 @@ export async function POST(request: NextRequest) {
     });
 
     const orderId = formatOrderId(counter.value);
+    // SALES users create orders that need admin confirmation
+    const initialStatus = userRole === "SALES" ? "PENDING_CONFIRMATION" : "ORDER_PLACED";
 
     // Use first item's category as the order-level category (for backward compat)
     const firstItem = orderItems[0] || {
@@ -147,13 +163,13 @@ export async function POST(request: NextRequest) {
         remarks: remarks || null,
         deliveryDeadline: deliveryDeadline ? new Date(deliveryDeadline) : null,
         priority: priority || "NORMAL",
-        status: "ORDER_PLACED",
+        status: initialStatus,
         createdById: userId,
         statusLogs: {
           create: {
             fromStatus: "",
-            toStatus: "ORDER_PLACED",
-            notes: "Order created",
+            toStatus: initialStatus,
+            notes: initialStatus === "PENDING_CONFIRMATION" ? "Order submitted — awaiting admin confirmation" : "Order created",
             changedById: userId,
           },
         },

@@ -40,3 +40,12 @@ next-env.d.ts
 .claude
 
 .next
+
+# local SQLite — binary churn (run once: git rm --cached dev.db prisma/dev.db)
+/dev.db
+/dev.db-journal
+/prisma/dev.db
+/prisma/dev.db-journal
+
+# EC2 production env (set manually on the server)
+.env.ec2

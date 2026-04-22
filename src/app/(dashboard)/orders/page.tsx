@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, Suspense } from "react";
 import { useSession } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -12,7 +12,7 @@ import type { UserRole, OrderStatus } from "@/types";
 import toast, { Toaster } from "react-hot-toast";
 import { PlusCircle, Search, Filter, Download, CheckSquare, Trash2, FileEdit, Clock, ChevronDown, ChevronUp } from "lucide-react";
 
-export default function OrdersPage() {
+function OrdersPageContent() {
   const { data: session, status: sessionStatus } = useSession();
   const { t, tStatus, tProduct } = useLanguage();
   const searchParams = useSearchParams();
@@ -534,5 +534,19 @@ export default function OrdersPage() {
         </Link>
       )}
     </div>
+  );
+}
+
+export default function OrdersPage() {
+  return (
+    <Suspense fallback={
+      <div className="space-y-3">
+        {[...Array(5)].map((_, i) => (
+          <div key={i} className="h-24 bg-gray-200 rounded-xl animate-pulse" />
+        ))}
+      </div>
+    }>
+      <OrdersPageContent />
+    </Suspense>
   );
 }
