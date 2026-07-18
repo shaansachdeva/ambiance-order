@@ -509,6 +509,18 @@ const translations = {
   "month.october": { en: "October", hi: "अक्टूबर" },
   "month.november": { en: "November", hi: "नवंबर" },
   "month.december": { en: "December", hi: "दिसंबर" },
+
+  // Party (customer) editing
+  "customers.editParty": { en: "Edit Party", hi: "पार्टी संपादित करें" },
+  "customers.partyNameLabel": { en: "Party Name", hi: "पार्टी का नाम" },
+  "customers.location": { en: "Location", hi: "स्थान" },
+  "customers.contactDetails": { en: "Contact Details", hi: "संपर्क विवरण" },
+  "customers.contactName": { en: "Contact Name", hi: "संपर्क नाम" },
+  "customers.contactPhone": { en: "Phone", hi: "फ़ोन" },
+  "customers.contactPosition": { en: "Position", hi: "पद" },
+  "customers.nameRequired": { en: "Party name is required", hi: "पार्टी का नाम आवश्यक है" },
+  "customers.partyUpdated": { en: "Party details updated", hi: "पार्टी विवरण अपडेट किया गया" },
+  "common.saving": { en: "Saving…", hi: "सहेजा जा रहा है…" },
 } as const;
 
 export type TranslationKey = keyof typeof translations;

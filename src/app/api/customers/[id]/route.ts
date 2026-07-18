@@ -42,11 +42,20 @@ export async function PATCH(
 
   try {
     const body = await request.json();
-    const { partyName, location } = body;
+    const { partyName, location, contactName, contactPhone, contactPosition } = body;
 
     const data: any = {};
-    if (partyName !== undefined) data.partyName = partyName.trim();
+    if (partyName !== undefined) {
+      const trimmed = partyName.trim();
+      if (!trimmed) {
+        return NextResponse.json({ error: "Party name cannot be empty" }, { status: 400 });
+      }
+      data.partyName = trimmed;
+    }
     if (location !== undefined) data.location = location?.trim() || null;
+    if (contactName !== undefined) data.contactName = contactName?.trim() || null;
+    if (contactPhone !== undefined) data.contactPhone = contactPhone?.trim() || null;
+    if (contactPosition !== undefined) data.contactPosition = contactPosition?.trim() || null;
 
     if (Object.keys(data).length === 0) {
       return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
