@@ -19,6 +19,13 @@ export async function GET(request: NextRequest) {
   const userRole = (session.user as any).role;
   const showCustomers = ["ADMIN", "SALES", "ACCOUNTANT"].includes(userRole);
 
+  // Postgres `contains` is case-sensitive by default, so party names stored as
+  // "Shivam Stationery" would never match a user typing "shivam". Opt into
+  // case-insensitive matching on Postgres (SQLite `contains` is already
+  // case-insensitive and rejects the `mode` arg, so omit it there).
+  const isPg = process.env.DB_PROVIDER === "postgresql";
+  const mode = isPg ? { mode: "insensitive" as const } : {};
+
   try {
     const [orders, customers] = await Promise.all([
       // Search orders by orderId or product category
@@ -26,11 +33,11 @@ export async function GET(request: NextRequest) {
         where: {
           deletedAt: null,
           OR: [
-            { orderId: { contains: q } },
-            { productCategory: { contains: q } },
-            { remarks: { contains: q } },
+            { orderId: { contains: q, ...mode } },
+            { productCategory: { contains: q, ...mode } },
+            { remarks: { contains: q, ...mode } },
             ...(showCustomers
-              ? [{ customer: { partyName: { contains: q } } }]
+              ? [{ customer: { partyName: { contains: q, ...mode } } }]
               : []),
           ],
         },
@@ -47,8 +54,8 @@ export async function GET(request: NextRequest) {
         ? prisma.customer.findMany({
             where: {
               OR: [
-                { partyName: { contains: q } },
-                { location: { contains: q } },
+                { partyName: { contains: q, ...mode } },
+                { location: { contains: q, ...mode } },
               ],
             },
             take: 5,

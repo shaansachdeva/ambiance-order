@@ -12,13 +12,19 @@ export async function GET(req: NextRequest) {
   const status = searchParams.get("status");
   const search = searchParams.get("search");
 
+  // Postgres `contains` is case-sensitive by default; opt into insensitive
+  // matching there so "shivam" finds "Shivam Stationery" (SQLite is already
+  // case-insensitive and rejects the mode arg).
+  const isPg = process.env.DB_PROVIDER === "postgresql";
+  const mode = isPg ? { mode: "insensitive" as const } : {};
+
   const where: any = {};
   if (status) where.status = status;
   if (search) {
     where.OR = [
-      { quotationId: { contains: search } },
-      { customer: { partyName: { contains: search } } },
-      { remarks: { contains: search } },
+      { quotationId: { contains: search, ...mode } },
+      { customer: { partyName: { contains: search, ...mode } } },
+      { remarks: { contains: search, ...mode } },
     ];
   }
 
