@@ -74,7 +74,9 @@ export async function GET(request: NextRequest) {
 
   // Pagination — response stays backward compatible (an array) unless ?page= is passed.
   // Hard cap at 500 rows even without pagination to avoid pulling the entire table.
-  const page = Math.max(1, parseInt(searchParams.get("page") || "0", 10) || 0);
+  // NOTE: page must floor to 0 when no ?page= is sent, otherwise `paginated` is
+  // always true and every caller silently gets only the first perPage (50) rows.
+  const page = Math.max(0, parseInt(searchParams.get("page") || "0", 10) || 0);
   const perPage = Math.min(200, Math.max(1, parseInt(searchParams.get("perPage") || "50", 10) || 50));
   const paginated = page > 0;
   const take = paginated ? perPage : 500;
