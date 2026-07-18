@@ -3,6 +3,12 @@ import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 
 export async function POST() {
+  // Seeding creates users with well-known default passwords. It must never be
+  // callable on a deployed instance — it was previously public and could mint
+  // login-capable accounts unauthenticated. Dev-only.
+  if (process.env.NODE_ENV === "production") {
+    return NextResponse.json({ error: "Seeding is disabled in production" }, { status: 403 });
+  }
   try {
     const hashedAdmin = await bcrypt.hash("admin123", 10);
     const hashedProd = await bcrypt.hash("prod123", 10);
