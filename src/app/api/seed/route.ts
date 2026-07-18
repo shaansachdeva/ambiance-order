@@ -9,50 +9,48 @@ export async function POST() {
     const hashedDispatch = await bcrypt.hash("dispatch123", 10);
     const hashedSales = await bcrypt.hash("sales123", 10);
 
+    // Seed passwords are only ever stored hashed. The plaintext lives here in
+    // source (dev fixtures), never in the database.
     const admin = await prisma.user.upsert({
       where: { username: "admin" },
-      update: { plainPassword: "admin123" },
+      update: {},
       create: {
         name: "Admin",
         username: "admin",
         password: hashedAdmin,
-        plainPassword: "admin123",
         role: "ADMIN",
       },
     });
 
     const prod = await prisma.user.upsert({
       where: { username: "production" },
-      update: { plainPassword: "prod123" },
+      update: {},
       create: {
         name: "Production Supervisor",
         username: "production",
         password: hashedProd,
-        plainPassword: "prod123",
         role: "PRODUCTION",
       },
     });
 
     const dispatch = await prisma.user.upsert({
       where: { username: "dispatch" },
-      update: { plainPassword: "dispatch123" },
+      update: {},
       create: {
         name: "Dispatch Team",
         username: "dispatch",
         password: hashedDispatch,
-        plainPassword: "dispatch123",
         role: "DISPATCH",
       },
     });
 
     const sales = await prisma.user.upsert({
       where: { username: "sales" },
-      update: { plainPassword: "sales123" },
+      update: {},
       create: {
         name: "Sales",
         username: "sales",
         password: hashedSales,
-        plainPassword: "sales123",
         role: "SALES",
       },
     });

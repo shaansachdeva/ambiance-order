@@ -24,7 +24,6 @@ export async function GET(request: NextRequest) {
       id: true,
       name: true,
       username: true,
-      plainPassword: true,
       role: true,
       customPermissions: true,
       active: true,
@@ -79,7 +78,6 @@ export async function POST(request: NextRequest) {
         name,
         username,
         password: hashedPassword,
-        plainPassword: password,
         role,
       },
       select: {

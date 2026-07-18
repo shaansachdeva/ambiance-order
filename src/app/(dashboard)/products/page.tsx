@@ -11,7 +11,7 @@ const BUILTIN_CATEGORIES = [
   {
     name: "BOPP Tape",
     key: "BOPP_TAPE",
-    fields: ["Type", "Size (inches)", "Size (mm)", "Micron", "Length (m)", "Core", "Boxes", "Jumbo Code"],
+    fields: ["Type", "Size (inches)", "Size (mm)", "Micron", "Length (m)", "Core", "Boxes"],
   },
   {
     name: "BOPP Jumbo",

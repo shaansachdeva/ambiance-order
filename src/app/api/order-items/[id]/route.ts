@@ -95,10 +95,23 @@ export async function PATCH(
         }, allItems[0]?.status || "ORDER_PLACED");
       }
 
-      await prisma.order.update({
-        where: { id: existing.orderId },
-        data: { status: orderStatus },
-      });
+      if (orderStatus !== existing.order.status) {
+        await prisma.order.update({
+          where: { id: existing.orderId },
+          data: { status: orderStatus },
+        });
+        await prisma.orderStatusLog.create({
+          data: {
+            orderId: existing.orderId,
+            fromStatus: existing.order.status,
+            toStatus: orderStatus,
+            notes: notes
+              ? `Synced from item: ${notes}`
+              : `Synced from item status change`,
+            changedById: user.id,
+          },
+        });
+      }
     }
 
     return NextResponse.json(updated);

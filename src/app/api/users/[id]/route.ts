@@ -62,7 +62,6 @@ export async function PATCH(
     }
     if (password !== undefined && password.trim() !== "") {
       updateData.password = await bcrypt.hash(password, 10);
-      updateData.plainPassword = password;
     }
 
     if (Object.keys(updateData).length === 0) {

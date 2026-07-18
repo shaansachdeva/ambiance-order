@@ -49,3 +49,5 @@ next-env.d.ts
 
 # EC2 production env (set manually on the server)
 .env.ec2
+# Claude working notes — not app code
+/memory/

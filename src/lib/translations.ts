@@ -74,6 +74,7 @@ const translations = {
   "dashboard.overview": { en: "Here's your order overview", hi: "आपके ऑर्डर की जानकारी" },
   "dashboard.openProduction": { en: "Open Production Panel", hi: "उत्पादन पैनल खोलें" },
   "dashboard.pendingOrders": { en: "Pending Orders", hi: "लंबित ऑर्डर" },
+  "dashboard.inProduction": { en: "In Production", hi: "उत्पादन में" },
   "dashboard.todaysProduction": { en: "Today's Production", hi: "आज का उत्पादन" },
   "dashboard.readyForDispatch": { en: "Ready for Dispatch", hi: "भेजने के लिए तैयार" },
   "dashboard.dispatched": { en: "Dispatched", hi: "भेज दिया गया" },
@@ -91,7 +92,7 @@ const translations = {
   "orders.bulkUpdate": { en: "Bulk Update", hi: "एक साथ अपडेट" },
   "orders.newOrder": { en: "New Order", hi: "नया ऑर्डर" },
   "orders.filters": { en: "Filters", hi: "फ़िल्टर" },
-  "orders.searchPlaceholder": { en: "Search order ID...", hi: "ऑर्डर ID खोजें..." },
+  "orders.searchPlaceholder": { en: "Search order ID or party name...", hi: "ऑर्डर ID या पार्टी नाम खोजें..." },
   "orders.allStatuses": { en: "All Statuses", hi: "सभी स्थिति" },
   "orders.allProducts": { en: "All Products", hi: "सभी उत्पाद" },
   "orders.newestFirst": { en: "Newest First", hi: "नवीनतम पहले" },
@@ -525,13 +526,18 @@ export function tStatus(status: string, lang: Language): string {
 }
 
 // Helper to get translated product category.
-// Custom categories are stored by their display name and have no translation key —
-// fall back to the raw name so users see "Kraft Tape" instead of "product.Kraft Tape".
+// Built-in keys (BOPP_TAPE etc.) get a real translation; custom names are
+// humanized so internal-style codes like "KRAFT_TAPE" render as "Kraft Tape".
 export function tProduct(category: string, lang: Language): string {
   const key = `product.${category}` as TranslationKey;
   const entry = translations[key];
-  if (!entry) return category;
-  return entry[lang] || entry.en;
+  if (entry) return entry[lang] || entry.en;
+  // Fallback for custom categories — humanize underscores/dashes + title-case.
+  return category
+    .replace(/[_-]+/g, " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+    .trim();
 }
 
 // Helper to get translated role

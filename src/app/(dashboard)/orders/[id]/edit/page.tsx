@@ -1,14 +1,148 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter, useParams } from "next/navigation";
 import ProductForm from "@/components/ProductForm";
-import { PRODUCT_CATEGORIES, ORDER_STATUSES } from "@/types";
+import { ORDER_STATUSES } from "@/types";
 import type { UserRole, ProductCategory, OrderStatus } from "@/types";
 import { hasPermission } from "@/lib/utils";
+import { useCategoryPicker, type PickerCategory } from "@/lib/useCategoryPicker";
 import toast, { Toaster } from "react-hot-toast";
-import { ArrowLeft, Save, Plus, Trash2, ChevronDown, ChevronUp, IndianRupee, Loader2 } from "lucide-react";
+import { ArrowLeft, Save, Plus, Trash2, ChevronDown, ChevronUp, IndianRupee, Loader2, Search, X, Package, Check } from "lucide-react";
+
+/**
+ * Searchable product picker — identical UX to the one on /orders/new.
+ * Lives inline to avoid coupling the two pages; if it grows further it should
+ * be lifted into a shared component.
+ */
+function CategoryPicker({
+  value,
+  categories,
+  onChange,
+  loaded,
+}: {
+  value: string;
+  categories: PickerCategory[];
+  onChange: (value: string) => void;
+  loaded: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [highlight, setHighlight] = useState(0);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  useEffect(() => {
+    if (open) setTimeout(() => inputRef.current?.focus(), 0);
+  }, [open]);
+
+  const selected = categories.find((c) => c.value === value) || null;
+  const q = search.trim().toLowerCase();
+  const filtered = q
+    ? categories.filter((c) => c.label.toLowerCase().includes(q) || c.value.toLowerCase().includes(q))
+    : categories;
+
+  return (
+    <div ref={boxRef} className="relative">
+      {selected && !open ? (
+        <button
+          type="button"
+          onClick={() => { setOpen(true); setSearch(""); setHighlight(0); }}
+          className="w-full flex items-center justify-between gap-2 px-3 py-2.5 bg-brand-50 border border-brand-200 ring-1 ring-brand-100 rounded-xl hover:border-brand-300 hover:bg-brand-100/60 transition-all active:scale-[0.99]"
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-brand-500 text-white flex items-center justify-center shrink-0 shadow-sm">
+              <Package className="w-4 h-4" />
+            </div>
+            <div className="min-w-0 text-left">
+              <p className="text-sm font-semibold text-gray-900 truncate">{selected.label}</p>
+              <p className="text-[11px] text-gray-500">Tap to change</p>
+            </div>
+          </div>
+          <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />
+        </button>
+      ) : (
+        <>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+            <input
+              ref={inputRef}
+              type="text"
+              value={search}
+              onFocus={() => { setOpen(true); setHighlight(0); }}
+              onChange={(e) => { setSearch(e.target.value); setOpen(true); setHighlight(0); }}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowDown") { e.preventDefault(); setOpen(true); setHighlight((h) => Math.min(filtered.length - 1, h + 1)); }
+                else if (e.key === "ArrowUp") { e.preventDefault(); setHighlight((h) => Math.max(0, h - 1)); }
+                else if (e.key === "Enter") {
+                  e.preventDefault();
+                  const pick = filtered[highlight];
+                  if (pick) { onChange(pick.value); setOpen(false); setSearch(""); }
+                } else if (e.key === "Escape") { setOpen(false); }
+              }}
+              placeholder={loaded ? (categories.length === 0 ? "No products yet — add one in Products" : "Search products...") : "Loading products..."}
+              className="w-full pl-9 pr-10 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 bg-white placeholder:text-gray-400 transition-all"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => { setSearch(""); setHighlight(0); }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          {open && (
+            <div className="absolute z-30 left-0 right-0 mt-1.5 bg-white border border-gray-200 rounded-xl shadow-lg ring-1 ring-gray-200/40 max-h-72 overflow-y-auto">
+              {filtered.length === 0 ? (
+                <div className="px-4 py-6 text-center">
+                  <div className="w-10 h-10 rounded-xl bg-gray-50 ring-1 ring-gray-100 flex items-center justify-center mx-auto mb-2">
+                    <Package className="w-5 h-5 text-gray-400" />
+                  </div>
+                  <p className="text-sm font-medium text-gray-700">
+                    {loaded ? (categories.length === 0 ? "No products yet" : "No matching products") : "Loading..."}
+                  </p>
+                </div>
+              ) : (
+                filtered.map((c, idx) => (
+                  <button
+                    key={c.value}
+                    type="button"
+                    onMouseEnter={() => setHighlight(idx)}
+                    onClick={() => { onChange(c.value); setOpen(false); setSearch(""); }}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors ${
+                      idx === highlight ? "bg-brand-50" : "hover:bg-gray-50"
+                    }`}
+                  >
+                    <div className="w-8 h-8 rounded-lg bg-gray-100 text-gray-700 flex items-center justify-center shrink-0">
+                      <Package className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{c.label}</p>
+                    </div>
+                    {c.value === value && <Check className="w-4 h-4 text-brand-500 shrink-0" />}
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
 import Link from "next/link";
 import { format } from "date-fns";
 
@@ -50,6 +184,9 @@ export default function EditOrderPage() {
   const [customerId, setCustomerId] = useState("");
   const [newPartyName, setNewPartyName] = useState("");
   const [newPartyLocation, setNewPartyLocation] = useState("");
+  const [newPartyContactName, setNewPartyContactName] = useState("");
+  const [newPartyContactPhone, setNewPartyContactPhone] = useState("");
+  const [newPartyContactPosition, setNewPartyContactPosition] = useState("");
   const [showNewParty, setShowNewParty] = useState(false);
   const [items, setItems] = useState<OrderItemData[]>([]);
   const [deliveryDeadline, setDeliveryDeadline] = useState("");
@@ -57,6 +194,19 @@ export default function EditOrderPage() {
   const [priority, setPriority] = useState<"NORMAL" | "URGENT">("NORMAL");
   const [status, setStatus] = useState<OrderStatus>("ORDER_PLACED");
   const [submitting, setSubmitting] = useState(false);
+  // Merged list of built-in + custom + admin-renamed categories. Without this
+  // the edit view fell back to the static PRODUCT_CATEGORIES constant, so any
+  // category added via /products never appeared and saved orders that referenced
+  // those custom names showed a blank "Select product..." header.
+  const { categories: allCategories, loaded: categoriesLoaded } = useCategoryPicker();
+  const [customCategories, setCustomCategories] = useState<{ id: string; name: string; fields: string }[]>([]);
+
+  useEffect(() => {
+    fetch("/api/product-categories")
+      .then((r) => r.json())
+      .then((d) => setCustomCategories(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  }, []);
 
   const userRole = ((session?.user as any)?.role || "SALES") as UserRole;
   const canEdit = userRole === "ADMIN" || userRole === "ACCOUNTANT" || userRole === "SALES";
@@ -153,7 +303,13 @@ export default function EditOrderPage() {
       const res = await fetch("/api/customers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ partyName: newPartyName.trim(), location: newPartyLocation.trim() || null }),
+        body: JSON.stringify({
+          partyName: newPartyName.trim(),
+          location: newPartyLocation.trim() || null,
+          contactName: newPartyContactName.trim() || null,
+          contactPhone: newPartyContactPhone.trim() || null,
+          contactPosition: newPartyContactPosition.trim() || null,
+        }),
       });
       const newCustomer = await res.json();
       if (res.ok) {
@@ -161,6 +317,9 @@ export default function EditOrderPage() {
         setCustomerId(newCustomer.id);
         setNewPartyName("");
         setNewPartyLocation("");
+        setNewPartyContactName("");
+        setNewPartyContactPhone("");
+        setNewPartyContactPosition("");
         setShowNewParty(false);
         toast.success(`Party "${newCustomer.partyName}" added`);
       } else {
@@ -236,12 +395,18 @@ export default function EditOrderPage() {
 
       {/* Header */}
       <div className="flex items-center gap-3 mb-6">
-        <Link
-          href={`/orders/${id}`}
+        {/* router.back() — Link would push and bounce between detail and edit. */}
+        <button
+          type="button"
+          onClick={() => {
+            if (typeof window !== "undefined" && window.history.length > 1) router.back();
+            else router.push(`/orders/${id}`);
+          }}
           className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+          aria-label="Back"
         >
           <ArrowLeft className="w-5 h-5 text-gray-600" />
-        </Link>
+        </button>
         <h1 className="text-xl font-bold text-gray-900">Edit Order</h1>
       </div>
 
@@ -251,63 +416,117 @@ export default function EditOrderPage() {
             1. Party Name
           </label>
 
-          {!showNewParty ? (
-            <div className="space-y-2">
-              <select
-                value={customerId}
-                onChange={(e) => setCustomerId(e.target.value)}
-                className="w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white"
-              >
-                <option value="">Select party...</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.partyName}{c.location ? ` — ${c.location}` : ""}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={() => setShowNewParty(true)}
-                className="text-sm text-brand-600 hover:text-brand-700 font-medium"
-              >
-                + Add new party
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <input
-                type="text"
-                value={newPartyName}
-                onChange={(e) => setNewPartyName(e.target.value)}
-                placeholder="Enter party name..."
-                className="w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-              />
-              <div className="flex gap-2">
+          {/* Party picker + side "+" button. Previously clicking "Add new party"
+              replaced the whole picker with an inline panel ("bar on top"),
+              which hid the party list and confused users. Now the picker stays
+              visible and the new-party form opens in a modal triggered by an
+              icon button beside the dropdown. */}
+          <div className="flex items-stretch gap-2">
+            <select
+              value={customerId}
+              onChange={(e) => setCustomerId(e.target.value)}
+              className="flex-1 px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white"
+            >
+              <option value="">Select party...</option>
+              {customers.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.partyName}{c.location ? ` — ${c.location}` : ""}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => setShowNewParty(true)}
+              className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2.5 text-sm font-semibold text-brand-700 bg-brand-50 hover:bg-brand-100 border border-brand-200 rounded-lg transition-colors"
+              title="Add a new party"
+            >
+              <Plus className="w-4 h-4" />
+              <span className="hidden sm:inline">New party</span>
+            </button>
+          </div>
+        </div>
+
+        {/* New-party modal — opens from the "+" side button. */}
+        {showNewParty && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+            onClick={() => setShowNewParty(false)}
+          >
+            <div
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-md border border-gray-200 overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
+                <h3 className="text-base font-semibold text-gray-900">Add new party</h3>
+                <button
+                  type="button"
+                  onClick={() => setShowNewParty(false)}
+                  className="p-1 text-gray-400 hover:text-gray-700 rounded"
+                  aria-label="Close"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="px-5 py-4 space-y-3">
+                <input
+                  type="text"
+                  value={newPartyName}
+                  onChange={(e) => setNewPartyName(e.target.value)}
+                  placeholder="Party name (required)"
+                  autoFocus
+                  className="w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
                 <input
                   type="text"
                   value={newPartyLocation}
                   onChange={(e) => setNewPartyLocation(e.target.value)}
-                  placeholder="Location (optional)..."
-                  className="flex-1 px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  placeholder="Location (optional)"
+                  className="w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
                 />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-gray-100">
+                  <input
+                    type="text"
+                    value={newPartyContactName}
+                    onChange={(e) => setNewPartyContactName(e.target.value)}
+                    placeholder="Contact name"
+                    className="w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                  <input
+                    type="tel"
+                    value={newPartyContactPhone}
+                    onChange={(e) => setNewPartyContactPhone(e.target.value)}
+                    placeholder="Phone number"
+                    className="w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                  <input
+                    type="text"
+                    value={newPartyContactPosition}
+                    onChange={(e) => setNewPartyContactPosition(e.target.value)}
+                    placeholder="Position / role"
+                    className="sm:col-span-2 w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+              </div>
+              <div className="px-5 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowNewParty(false)}
+                  className="px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
                 <button
                   type="button"
                   onClick={handleCreateCustomer}
-                  className="px-4 py-2.5 bg-brand-500 text-white text-sm rounded-lg hover:bg-brand-600 transition-colors"
+                  disabled={!newPartyName.trim()}
+                  className="px-4 py-2 text-sm font-semibold text-white bg-brand-500 hover:bg-brand-600 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Add
+                  Add party
                 </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setShowNewParty(false)}
-                className="text-sm text-gray-500 hover:text-gray-700"
-              >
-                Back to list
-              </button>
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Order Items */}
         <div className="space-y-3">
@@ -329,7 +548,7 @@ export default function EditOrderPage() {
                   </span>
                   <span className="text-sm font-medium text-gray-700">
                     {item.productCategory
-                      ? PRODUCT_CATEGORIES.find((c) => c.value === item.productCategory)?.label
+                      ? (allCategories.find((c) => c.value === item.productCategory)?.label || item.productCategory)
                       : "Select product..."}
                   </span>
                 </div>
@@ -357,41 +576,38 @@ export default function EditOrderPage() {
               {item.expanded && (
                 <div className="p-4 space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className="block text-[11px] uppercase tracking-wide font-semibold text-gray-500 mb-1.5">
                       Product Category
                     </label>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                      {PRODUCT_CATEGORIES.map((cat) => (
-                        <button
-                          key={cat.value}
-                          type="button"
-                          onClick={() => {
-                            if (cat.value !== item.productCategory) {
-                              updateItem(item.id, {
-                                productCategory: cat.value,
-                                productDetails: {},
-                              });
-                            }
-                          }}
-                          className={`px-3 py-2 text-sm rounded-lg border-2 font-medium transition-all ${
-                            item.productCategory === cat.value
-                              ? "border-brand-500 bg-brand-50 text-brand-700"
-                              : "border-gray-200 text-gray-600 hover:border-gray-300"
-                          }`}
-                        >
-                          {cat.label}
-                        </button>
-                      ))}
-                    </div>
+                    <CategoryPicker
+                      value={item.productCategory}
+                      categories={allCategories}
+                      loaded={categoriesLoaded}
+                      onChange={(value) => {
+                        if (value !== item.productCategory) {
+                          updateItem(item.id, { productCategory: value as ProductCategory, productDetails: {} });
+                        }
+                      }}
+                    />
                   </div>
 
-                  {item.productCategory && (
-                    <ProductForm
-                      productCategory={item.productCategory as ProductCategory}
-                      productDetails={item.productDetails}
-                      onChange={(details) => updateItem(item.id, { productDetails: details })}
-                    />
-                  )}
+                  {item.productCategory && (() => {
+                    // Custom categories carry their own field list (saved as JSON in /products);
+                    // pass them through so the form renders the same inputs as on the New Order page.
+                    const customCat = customCategories.find((c) => c.name === item.productCategory);
+                    let customFields: string[] | undefined;
+                    if (customCat) {
+                      try { customFields = JSON.parse(customCat.fields); } catch {}
+                    }
+                    return (
+                      <ProductForm
+                        productCategory={item.productCategory as ProductCategory}
+                        productDetails={item.productDetails}
+                        onChange={(details) => updateItem(item.id, { productDetails: details })}
+                        customFields={customFields}
+                      />
+                    );
+                  })()}
 
                   <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-100">
                     <div>

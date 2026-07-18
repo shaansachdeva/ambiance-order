@@ -38,7 +38,9 @@ export async function GET(request: Request) {
 
     const searchTerm = search?.trim();
     if (searchTerm) {
-      const isPostgres = process.env.DB_PROVIDER === "postgres";
+      // DB_PROVIDER is "postgresql" (matches prisma.config.ts and src/lib/prisma.ts).
+      // Postgres needs `mode: "insensitive"` for case-insensitive `contains`; SQLite ignores it.
+      const isPostgres = process.env.DB_PROVIDER === "postgresql";
       const mk = (v: string) => (isPostgres ? { contains: v, mode: "insensitive" as const } : { contains: v });
       whereClause.OR = [
         { companyName: mk(searchTerm) },

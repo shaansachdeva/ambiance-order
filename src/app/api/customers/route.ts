@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { partyName, location } = body;
+    const { partyName, location, contactName, contactPhone, contactPosition } = body;
 
     if (!partyName || !partyName.trim()) {
       return NextResponse.json(
@@ -42,6 +42,9 @@ export async function POST(request: NextRequest) {
       data: {
         partyName: partyName.trim(),
         location: location?.trim() || null,
+        contactName: contactName?.trim() || null,
+        contactPhone: contactPhone?.trim() || null,
+        contactPosition: contactPosition?.trim() || null,
       },
     });
 

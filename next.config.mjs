@@ -11,6 +11,9 @@ const nextConfig = {
       "better-sqlite3",
       "pg",
     ],
+    // Preserve scroll position when navigating Back/Forward so users land where
+    // they left off on long lists (e.g., orders) instead of being snapped to top.
+    scrollRestoration: true,
   },
 };
 

@@ -57,7 +57,54 @@ export function getProductCategoryLabel(category: string): string {
     BARCODE_LABEL: "Barcode Label",
     COMPUTER_STATIONERY: "Computer Stationery",
   };
-  return labels[category] || category;
+  if (labels[category]) return labels[category];
+  // Custom product — humanize an internal-style key (e.g. "KRAFT_TAPE" → "Kraft Tape").
+  // Existing user-friendly names (e.g. "Kraft Tape") pass through unchanged.
+  return category
+    .replace(/[_-]+/g, " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+    .trim();
+}
+
+/**
+ * Pull the quantity value out of an item's product details.
+ * Built-in categories use specific keys (BOPP_TAPE → boxes, BARCODE_LABEL → quantity, etc.).
+ * Custom categories use a fuzzy match: any field whose name looks like quantity/qty/boxes/packets/rolls.
+ */
+const BUILTIN_QUANTITY_KEYS: Record<string, string> = {
+  BOPP_TAPE: "boxes",
+  BOPP_JUMBO: "quantity",
+  THERMAL_ROLL: "boxes",
+  BARCODE_LABEL: "quantity",
+  COMPUTER_STATIONERY: "packets",
+};
+
+const QTY_FIELD_PATTERNS = [
+  /^qty$/i,
+  /^quantity$/i,
+  /^boxes?$/i,
+  /^packets?$/i,
+  /^rolls?$/i,
+  /^cartons?$/i,
+  /\bqty\b/i,
+  /\bquantity\b/i,
+];
+
+export function extractQuantity(category: string, details: Record<string, any> | null | undefined): { value: string; key: string } {
+  if (!details || typeof details !== "object") return { value: "", key: "" };
+  const builtinKey = BUILTIN_QUANTITY_KEYS[category];
+  if (builtinKey && details[builtinKey] != null && String(details[builtinKey]).trim() !== "") {
+    return { value: String(details[builtinKey]), key: builtinKey };
+  }
+  // Fuzzy: scan keys for the first one that looks like a quantity.
+  for (const k of Object.keys(details)) {
+    if (details[k] == null || String(details[k]).trim() === "") continue;
+    if (QTY_FIELD_PATTERNS.some((p) => p.test(k))) {
+      return { value: String(details[k]), key: k };
+    }
+  }
+  return { value: "", key: "" };
 }
 
 export function getStatusLabel(status: string): string {

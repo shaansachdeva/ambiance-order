@@ -52,7 +52,16 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  if (search) andConditions.push({ orderId: { contains: search } });
+  if (search) {
+    const isPg = process.env.DB_PROVIDER === "postgresql";
+    const mode = isPg ? { mode: "insensitive" as const } : {};
+    andConditions.push({
+      OR: [
+        { orderId: { contains: search, ...mode } },
+        { customer: { partyName: { contains: search, ...mode } } },
+      ],
+    });
+  }
   if (customerId) andConditions.push({ customerId });
   if (priority) andConditions.push({ priority });
 
@@ -87,6 +96,12 @@ export async function GET(request: NextRequest) {
             },
           }
         : true,
+      statusLogs: {
+        where: { toStatus: "DISPATCHED" },
+        orderBy: { changedAt: "desc" },
+        take: 1,
+        select: { changedAt: true },
+      },
     },
     orderBy: { createdAt: "desc" },
     take,

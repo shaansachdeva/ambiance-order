@@ -4,6 +4,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import SessionProvider from "@/components/SessionProvider";
 import { LanguageProvider } from "@/contexts/LanguageContext";
+import { NumberWheelGuard } from "@/components/NumberWheelGuard";
 import "./globals.css";
 
 const inter = Inter({
@@ -15,6 +16,11 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "Ambiance - Order Management",
   description: "Order & Production Tracking System",
+  icons: {
+    icon: "/small-logo.png",
+    shortcut: "/small-logo.png",
+    apple: "/small-logo.png",
+  },
 };
 
 export const viewport: Viewport = {
@@ -39,6 +45,7 @@ export default async function RootLayout({
             effect when the user returns to the tab) and every 15 min as a fallback.
             The session callback caches DB lookups for 30s, so this is cheap. */}
         <SessionProvider session={session} refetchOnWindowFocus refetchInterval={900}>
+          <NumberWheelGuard />
           <LanguageProvider>{children}</LanguageProvider>
         </SessionProvider>
       </body>

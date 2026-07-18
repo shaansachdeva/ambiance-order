@@ -18,6 +18,23 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   });
 
   if (!quotation) return NextResponse.json({ error: "Quotation not found" }, { status: 404 });
+
+  // Legacy data fix: a previous version of the new-quotation form stored a
+  // CustomProductCategory cuid in `productCategory` instead of the category's name.
+  // Normalize on read so PDFs / detail views show "Kraft Tape" instead of "cmaxx9b3...".
+  // (No-op for items that already store the name or a built-in key.)
+  if (quotation.items?.length) {
+    const cuidLike = quotation.items.filter((i: any) => /^c[a-z0-9]{20,}$/i.test(i.productCategory));
+    if (cuidLike.length > 0) {
+      const cats = await prisma.customProductCategory.findMany({ select: { id: true, name: true } });
+      const idToName: Record<string, string> = {};
+      for (const c of cats) idToName[c.id] = c.name;
+      for (const item of quotation.items as any[]) {
+        if (idToName[item.productCategory]) item.productCategory = idToName[item.productCategory];
+      }
+    }
+  }
+
   return NextResponse.json(quotation);
 }
 

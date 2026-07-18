@@ -4,18 +4,19 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
-import { formatDate, getProductCategoryLabel, safeParseJSON } from "@/lib/utils";
+import { formatDate, getProductCategoryLabel, safeParseJSON, extractQuantity } from "@/lib/utils";
 import type { UserRole } from "@/types";
 import toast, { Toaster } from "react-hot-toast";
 import { ArrowLeft, Download, Loader2, Printer, Pencil, CheckCircle, XCircle, Clock, Send, FileText } from "lucide-react";
 
-const HEADER_BG = "linear-gradient(135deg, #0d2b1a 0%, #1a5233 100%)";
-const ACCENT    = "#1a5233";
+const ACCENT      = "#16a34a";   // brand green
+const ACCENT_DARK = "#15803d";
+const TEXT_MUTED  = "#6b7280";
+const TEXT_DIM    = "#9ca3af";
+const BORDER      = "#e5e7eb";
+const BG_SOFT     = "#f9fafb";
 
-const QUANTITY_KEY: Record<string, string> = {
-  BOPP_TAPE: "boxes", BOPP_JUMBO: "quantity",
-  THERMAL_ROLL: "boxes", BARCODE_LABEL: "quantity", COMPUTER_STATIONERY: "packets",
-};
+// Quantity detection now lives in lib/utils so it works for built-ins AND custom products.
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
   DRAFT:    { label: "Draft",    color: "bg-gray-100 text-gray-700",   icon: <FileText className="w-3.5 h-3.5" /> },
@@ -35,6 +36,26 @@ export default function QuotationDetailPage() {
   const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
   const [logoSrc, setLogoSrc] = useState("/ambiance-logo.png");
   const formRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [previewScale, setPreviewScale] = useState(1);
+  const [previewHeight, setPreviewHeight] = useState<number | null>(null);
+
+  useEffect(() => {
+    const A4_PX = 793.7;
+    const recalc = () => {
+      if (!stageRef.current || !formRef.current) return;
+      const stageW = stageRef.current.offsetWidth;
+      const scale = Math.min(1, stageW / A4_PX);
+      setPreviewScale(scale);
+      setPreviewHeight(formRef.current.scrollHeight * scale);
+    };
+    recalc();
+    const ro = new ResizeObserver(recalc);
+    if (stageRef.current) ro.observe(stageRef.current);
+    if (formRef.current) ro.observe(formRef.current);
+    window.addEventListener("resize", recalc);
+    return () => { ro.disconnect(); window.removeEventListener("resize", recalc); };
+  }, [quotation]);
 
   const userRole = ((session?.user as any)?.role || "SALES") as UserRole;
   const canEdit = ["ADMIN", "SALES", "ACCOUNTANT"].includes(userRole);
@@ -76,10 +97,15 @@ export default function QuotationDetailPage() {
     const html2canvas = (await import("html2canvas")).default;
     const { jsPDF } = await import("jspdf");
 
+    const prevTransform = formRef.current.style.transform;
+    formRef.current.style.transform = "none";
+
     const canvas = await html2canvas(formRef.current, {
       scale: 2, useCORS: false, allowTaint: true,
       backgroundColor: "#ffffff", logging: false, removeContainer: true,
     });
+
+    if (formRef.current) formRef.current.style.transform = prevTransform;
 
     const imgData = canvas.toDataURL("image/png");
     const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -123,19 +149,34 @@ export default function QuotationDetailPage() {
   const st = STATUS_CONFIG[quotation.status] || STATUS_CONFIG.DRAFT;
   const hasRate = (quotation.items || []).some((i: any) => i.rate);
   const hasGst  = (quotation.items || []).some((i: any) => i.gst);
-  const colDefs = ["28px", "1fr", "1.8fr", "60px", ...(hasRate ? ["90px"] : []), ...(hasGst ? ["56px"] : [])];
+  const colDefs = ["32px", "1.1fr", "1.9fr", "64px", ...(hasRate ? ["90px"] : []), ...(hasGst ? ["56px"] : [])];
   const gridCols = colDefs.join(" ");
   const isGenerating = activeAction !== null;
 
+  // Totals
+  let subtotal = 0, gstTotal = 0;
+  if (hasRate) {
+    for (const item of (quotation.items || [])) {
+      const d = safeParseJSON(item.productDetails);
+      const qty = parseFloat(extractQuantity(item.productCategory, d).value || "0") || 0;
+      const rate = parseFloat(item.rate || 0) || 0;
+      const lineTotal = qty * rate;
+      subtotal += lineTotal;
+      if (item.gst) gstTotal += lineTotal * (parseFloat(item.gst) / 100);
+    }
+  }
+  const grandTotal = subtotal + gstTotal;
+  const fmtINR = (n: number) => `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
   return (
-    <div className="max-w-2xl mx-auto pb-12">
+    <div className="max-w-[820px] mx-auto pb-12 px-3 sm:px-0">
       <Toaster position="top-center" />
       <style>{`
         @media print {
-          @page { size: A4; margin: 10mm; }
+          @page { size: A4; margin: 0; }
           body * { visibility: hidden; }
           #quotation-print, #quotation-print * { visibility: visible; }
-          #quotation-print { position: fixed; top: 0; left: 0; width: 100%; }
+          #quotation-print { position: fixed; top: 0; left: 0; width: 210mm !important; box-shadow: none !important; }
           .no-print { display: none !important; }
         }
       `}</style>
@@ -202,97 +243,257 @@ export default function QuotationDetailPage() {
 
       {isGenerating && <p className="no-print text-center text-sm text-gray-400 mb-3 animate-pulse">Generating PDF…</p>}
 
-      {/* QUOTATION FORM — captured to PDF */}
-      <div id="quotation-print" ref={formRef} style={{ fontFamily: "'Helvetica Neue', Arial, sans-serif", color: "#111", background: "#fff" }}>
+      {/* QUOTATION FORM — captured to PDF (A4-shaped on-screen preview, scaled
+          to fit narrow viewports without affecting the captured size) */}
+      <div
+        ref={stageRef}
+        className="pdf-stage"
+        style={{
+          width: "100%",
+          maxWidth: "210mm",
+          margin: "0 auto",
+          height: previewHeight ?? undefined,
+          overflow: "hidden",
+          position: "relative",
+        }}
+      >
+      <div
+        id="quotation-print"
+        ref={formRef}
+        style={{
+          fontFamily: "'Helvetica Neue', 'Inter', Arial, sans-serif",
+          color: "#111827",
+          background: "#fff",
+          fontFeatureSettings: "'tnum' 1, 'lnum' 1",
+          width: "210mm",
+          minHeight: "297mm",
+          margin: "0",
+          transform: `scale(${previewScale})`,
+          transformOrigin: "top left",
+          boxShadow: "0 1px 3px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04)",
+        }}
+      >
+        {/* Top accent strip */}
+        <div style={{ height: 6, background: ACCENT }} />
 
         {/* HEADER */}
-        <div style={{ background: HEADER_BG, padding: "20px 24px", color: "#fff" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}>
+        <div style={{ padding: "28px 32px 24px", borderBottom: `1px solid ${BORDER}` }}>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 32 }}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 14, flex: "1 1 0", minWidth: 0 }}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={logoSrc} alt="Ambiance" style={{ height: 44, width: "auto", objectFit: "contain", flexShrink: 0 }} />
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.2 }}>Ambiance Printing &amp; Packaging</div>
-                <div style={{ fontSize: 9.5, opacity: 0.78, marginTop: 4, lineHeight: 1.55 }}>
+              <img src={logoSrc} alt="Ambiance" style={{ height: 56, width: "auto", objectFit: "contain", flexShrink: 0, marginTop: 2 }} />
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 17, fontWeight: 700, lineHeight: 1.15, letterSpacing: "-0.3px", color: "#0f172a" }}>
+                  Ambiance Printing &amp; Packaging
+                </div>
+                <div style={{ fontSize: 10, color: TEXT_MUTED, marginTop: 6, lineHeight: 1.55 }}>
                   Mandebar Road, Vill. Kheri Rangran<br />Yamunanagar, Haryana (India) 135001
                 </div>
-                <div style={{ fontSize: 9, opacity: 0.68, marginTop: 2 }}>info@pakzy3s.com &nbsp;·&nbsp; ambianceynr@gmail.com</div>
+                <div style={{ fontSize: 9.5, color: TEXT_DIM, marginTop: 3, lineHeight: 1.4 }}>
+                  info@pakzy3s.com &nbsp;·&nbsp; ambianceynr@gmail.com
+                </div>
               </div>
             </div>
-            <div style={{ flexShrink: 0, textAlign: "center", background: "rgba(255,255,255,0.14)", border: "1px solid rgba(255,255,255,0.35)", borderRadius: 10, padding: "10px 20px" }}>
-              <div style={{ fontSize: 8.5, fontWeight: 600, opacity: 0.72, textTransform: "uppercase" as const, letterSpacing: 1.2, marginBottom: 4 }}>QUOTATION</div>
-              <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: "-0.4px", lineHeight: 1 }}>{quotation.quotationId}</div>
+
+            {/* Doc badge */}
+            <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "flex-end", justifyContent: "flex-start", paddingTop: 2 }}>
+              <div style={{
+                display: "inline-block", padding: "4px 10px",
+                background: BG_SOFT, color: ACCENT_DARK,
+                fontSize: 9, fontWeight: 700, letterSpacing: 1.5,
+                borderRadius: 4, textTransform: "uppercase" as const,
+                border: `1px solid ${BORDER}`,
+                lineHeight: 1.2,
+              }}>
+                Quotation
+              </div>
+              <div style={{ fontSize: 28, fontWeight: 700, letterSpacing: "-0.7px", color: "#0f172a", marginTop: 8, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
+                {quotation.quotationId}
+              </div>
+              <div style={{ fontSize: 10, color: TEXT_MUTED, marginTop: 6, lineHeight: 1.2 }}>
+                {formatDate(quotation.createdAt)}
+              </div>
             </div>
           </div>
         </div>
 
         {/* BODY */}
-        <div style={{ padding: "22px 24px" }}>
-          {/* Meta strip */}
-          <div style={{ display: "flex", flexWrap: "wrap", marginBottom: 20, border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
-            {([
-              { label: "DATE",       value: formatDate(quotation.createdAt) },
-              quotation.validUntil ? { label: "VALID UNTIL", value: formatDate(quotation.validUntil) } : null,
-              quotation.customer?.partyName ? { label: "PARTY",    value: quotation.customer.partyName } : null,
-              quotation.customer?.location  ? { label: "LOCATION", value: quotation.customer.location  } : null,
-            ] as any[]).filter(Boolean).map((cell: any, i: number) => (
-              <div key={i} style={{ flex: "1 1 40%", padding: "10px 14px", background: i % 2 === 0 ? "#f9fafb" : "#fff", borderRight: "1px solid #e5e7eb", borderBottom: "1px solid #e5e7eb" }}>
-                <div style={{ fontSize: 8, fontWeight: 600, color: "#6b7280", letterSpacing: 0.8, marginBottom: 2, textTransform: "uppercase" as const }}>{cell.label}</div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#111827" }}>{cell.value}</div>
+        <div style={{ padding: "24px 32px" }}>
+
+          {/* Quotation For + Validity */}
+          <div style={{
+            display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginBottom: 24,
+            paddingBottom: 18, borderBottom: `1px solid ${BORDER}`,
+          }}>
+            <div>
+              <div style={{ fontSize: 8.5, fontWeight: 700, color: TEXT_MUTED, letterSpacing: 1.2, marginBottom: 6, textTransform: "uppercase" as const }}>
+                Quotation For
               </div>
-            ))}
-          </div>
-
-          {/* Table header */}
-          <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: "0 8px", background: ACCENT, color: "#fff", padding: "9px 14px", borderRadius: "8px 8px 0 0", fontSize: 9.5, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: 0.5 }}>
-            <div style={{ width: "100%" }}>#</div><div style={{ width: "100%" }}>Product</div><div style={{ width: "100%" }}>Specifications</div><div style={{ textAlign: "center", width: "100%" }}>Qty</div>
-            {hasRate && <div style={{ textAlign: "right", width: "100%" }}>Price</div>}
-            {hasGst  && <div style={{ textAlign: "right", width: "100%" }}>GST %</div>}
-          </div>
-
-          {/* Table rows */}
-          {(quotation.items || []).map((item: any, idx: number) => {
-            const d: Record<string, string> = safeParseJSON(item.productDetails);
-            const qKey = QUANTITY_KEY[item.productCategory] || "";
-            const qty = qKey ? (d[qKey] || "") : "";
-            const specPairs = Object.entries(d).filter(([k, v]) => v && k !== qKey).map(([k, v]) => {
-              const lbl = k.replace(/([A-Z])/g, " $1").replace(/^./, (s) => s.toUpperCase());
-              return `${lbl}: ${v}`;
-            });
-            return (
-              <div key={item.id} style={{ display: "grid", gridTemplateColumns: gridCols, gap: "0 8px", padding: "11px 14px", background: idx % 2 === 0 ? "#f9fafb" : "#fff", borderBottom: "1px solid #e5e7eb", borderLeft: "1px solid #e5e7eb", borderRight: "1px solid #e5e7eb" }}>
-                <div style={{ fontSize: 11, color: "#6b7280", alignSelf: "start", paddingTop: 1 }}>{idx + 1}</div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: "#1f2937", alignSelf: "start" }}>{getProductCategoryLabel(item.productCategory)}</div>
-                <div style={{ fontSize: 9.5, color: "#4b5563", lineHeight: 1.5 }}>{specPairs.join(" · ")}</div>
-                <div style={{ fontSize: 11, fontWeight: 600, textAlign: "center", alignSelf: "start", width: "100%" }}>{qty}</div>
-                {hasRate && <div style={{ fontSize: 11, fontWeight: 600, textAlign: "right", color: "#1f2937", width: "100%" }}>{item.rate ? `₹${item.rate}` : "—"}</div>}
-                {hasGst  && <div style={{ fontSize: 11, textAlign: "right", color: "#6b7280", width: "100%" }}>{item.gst ? `${item.gst}%` : "—"}</div>}
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", lineHeight: 1.3 }}>
+                {quotation.customer?.partyName || "—"}
               </div>
-            );
-          })}
-
-          {/* Footer */}
-          {(quotation.remarks || quotation.termsAndCond) && (
-            <div style={{ marginTop: 16, padding: "12px 14px", background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: "0 0 8px 8px" }}>
-              {quotation.remarks && (
-                <div style={{ marginBottom: quotation.termsAndCond ? 8 : 0 }}>
-                  <span style={{ fontSize: 9, fontWeight: 700, color: "#6b7280", textTransform: "uppercase" as const, letterSpacing: 0.8 }}>Remarks: </span>
-                  <span style={{ fontSize: 10, color: "#374151" }}>{quotation.remarks}</span>
-                </div>
-              )}
-              {quotation.termsAndCond && (
-                <div>
-                  <span style={{ fontSize: 9, fontWeight: 700, color: "#6b7280", textTransform: "uppercase" as const, letterSpacing: 0.8 }}>Terms &amp; Conditions: </span>
-                  <span style={{ fontSize: 10, color: "#374151" }}>{quotation.termsAndCond}</span>
+              {quotation.customer?.location && (
+                <div style={{ fontSize: 10.5, color: TEXT_MUTED, marginTop: 4, lineHeight: 1.4 }}>
+                  {quotation.customer.location}
                 </div>
               )}
             </div>
+            <div>
+              <div style={{ display: "grid", gridTemplateColumns: "max-content 1fr", columnGap: 16, rowGap: 6, alignItems: "baseline" }}>
+                {quotation.validUntil && (
+                  <>
+                    <div style={{ fontSize: 8.5, fontWeight: 700, color: TEXT_MUTED, letterSpacing: 1.2, textTransform: "uppercase" as const }}>
+                      Valid Until
+                    </div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a", textAlign: "right" }}>
+                      {formatDate(quotation.validUntil)}
+                    </div>
+                  </>
+                )}
+                <div style={{ fontSize: 8.5, fontWeight: 700, color: TEXT_MUTED, letterSpacing: 1.2, textTransform: "uppercase" as const }}>
+                  Status
+                </div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: ACCENT_DARK, textAlign: "right" }}>
+                  {st.label.toUpperCase()}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Items table */}
+          <div style={{ border: `1px solid ${BORDER}`, borderRadius: 8, overflow: "hidden" }}>
+            <div style={{
+              display: "grid", gridTemplateColumns: gridCols, gap: "0 10px",
+              background: BG_SOFT, color: "#374151",
+              padding: "10px 16px",
+              fontSize: 9, fontWeight: 700,
+              textTransform: "uppercase" as const, letterSpacing: 0.8,
+              borderBottom: `1px solid ${BORDER}`,
+            }}>
+              <div style={{ width: "100%" }}>#</div>
+              <div style={{ width: "100%" }}>Product</div>
+              <div style={{ width: "100%" }}>Specifications</div>
+              <div style={{ textAlign: "center", width: "100%" }}>Qty</div>
+              {hasRate && <div style={{ textAlign: "right", width: "100%" }}>Rate</div>}
+              {hasGst  && <div style={{ textAlign: "right", width: "100%" }}>GST</div>}
+            </div>
+
+            {(quotation.items || []).map((item: any, idx: number, arr: any[]) => {
+              const d: Record<string, string> = safeParseJSON(item.productDetails);
+              const { value: qty, key: qKey } = extractQuantity(item.productCategory, d);
+              const specPairs = Object.entries(d).filter(([k, v]) => v && k !== qKey).map(([k, v]) => {
+                const lbl = k.replace(/([A-Z])/g, " $1").replace(/^./, (s) => s.toUpperCase());
+                return `${lbl}: ${v}`;
+              });
+              return (
+                <div key={item.id} style={{
+                  display: "grid", gridTemplateColumns: gridCols, gap: "0 10px",
+                  padding: "13px 16px",
+                  borderBottom: idx === arr.length - 1 ? "none" : `1px solid ${BORDER}`,
+                  alignItems: "start",
+                  background: "#fff",
+                }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: TEXT_MUTED, paddingTop: 1 }}>
+                    {String(idx + 1).padStart(2, "0")}
+                  </div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a", paddingTop: 1, lineHeight: 1.3 }}>
+                    {getProductCategoryLabel(item.productCategory)}
+                  </div>
+                  <div style={{ fontSize: 10, color: "#4b5563", lineHeight: 1.6 }}>
+                    {specPairs.length > 0 ? specPairs.map((spec, si) => (
+                      <span key={si}>
+                        {si > 0 && <span style={{ color: "#d1d5db", margin: "0 6px" }}>·</span>}
+                        {spec}
+                      </span>
+                    )) : <span style={{ color: TEXT_DIM }}>No specifications</span>}
+                  </div>
+                  <div style={{ fontSize: 12, fontWeight: 700, textAlign: "center", color: "#0f172a", paddingTop: 1, width: "100%" }}>
+                    {qty || "—"}
+                  </div>
+                  {hasRate && (
+                    <div style={{ fontSize: 11.5, fontWeight: 700, textAlign: "right", color: "#0f172a", paddingTop: 1, width: "100%" }}>
+                      {item.rate ? fmtINR(Number(item.rate)) : "—"}
+                    </div>
+                  )}
+                  {hasGst && (
+                    <div style={{ fontSize: 11.5, fontWeight: 600, textAlign: "right", color: "#374151", paddingTop: 1, width: "100%" }}>
+                      {item.gst ? `${item.gst}%` : "—"}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Totals */}
+          {hasRate && (
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+              <div style={{ minWidth: 240, fontSize: 11 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", color: TEXT_MUTED }}>
+                  <span>Subtotal</span>
+                  <span style={{ color: "#0f172a", fontWeight: 600 }}>{fmtINR(subtotal)}</span>
+                </div>
+                {hasGst && (
+                  <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", color: TEXT_MUTED }}>
+                    <span>GST</span>
+                    <span style={{ color: "#0f172a", fontWeight: 600 }}>{fmtINR(gstTotal)}</span>
+                  </div>
+                )}
+                <div style={{
+                  display: "flex", justifyContent: "space-between",
+                  padding: "10px 14px", marginTop: 4,
+                  background: ACCENT, color: "#fff",
+                  borderRadius: 6, fontSize: 13, fontWeight: 700,
+                }}>
+                  <span>Total</span>
+                  <span>{fmtINR(grandTotal)}</span>
+                </div>
+              </div>
+            </div>
           )}
 
-          <div style={{ marginTop: 20, fontSize: 9, color: "#9ca3af", textAlign: "center" as const }}>
-            This is a computer-generated quotation. For queries, contact us at ambianceynr@gmail.com
+          {/* Remarks */}
+          {quotation.remarks && (
+            <div style={{
+              marginTop: 24,
+              padding: "12px 16px",
+              background: BG_SOFT,
+              borderLeft: `3px solid ${ACCENT}`,
+              borderRadius: "0 6px 6px 0",
+            }}>
+              <div style={{ fontSize: 8.5, fontWeight: 700, color: ACCENT_DARK, textTransform: "uppercase" as const, letterSpacing: 1, marginBottom: 4 }}>
+                Notes
+              </div>
+              <div style={{ fontSize: 11, color: "#374151", lineHeight: 1.55 }}>{quotation.remarks}</div>
+            </div>
+          )}
+
+          {/* Terms */}
+          {quotation.termsAndCond && (
+            <div style={{ marginTop: 16, padding: "12px 16px", border: `1px solid ${BORDER}`, borderRadius: 6 }}>
+              <div style={{ fontSize: 8.5, fontWeight: 700, color: TEXT_MUTED, textTransform: "uppercase" as const, letterSpacing: 1, marginBottom: 6 }}>
+                Terms &amp; Conditions
+              </div>
+              <div style={{ fontSize: 10, color: "#374151", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{quotation.termsAndCond}</div>
+            </div>
+          )}
+
+          {/* Footer */}
+          <div style={{ marginTop: 32, paddingTop: 14, borderTop: `1px solid ${BORDER}` }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+              <div style={{ fontSize: 9, color: TEXT_DIM }}>
+                Ambiance Printing &amp; Packaging · Yamunanagar, Haryana 135001
+              </div>
+              <div style={{ fontSize: 9, color: TEXT_DIM }}>
+                info@pakzy3s.com · ambianceynr@gmail.com
+              </div>
+            </div>
+            <div style={{ fontSize: 8.5, color: TEXT_DIM, textAlign: "center" }}>
+              This is a computer-generated quotation. Subject to availability. Prices in INR.
+            </div>
           </div>
         </div>
+      </div>
       </div>
     </div>
   );

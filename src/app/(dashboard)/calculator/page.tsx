@@ -10,6 +10,7 @@ const WIDTH_OPTIONS: { label: string; key: string; constant: string; pcs: number
   { key: "0.5",  label: '0.5"',  constant: "0.0144", pcs: 288 },
   { key: "0.75", label: '3/4"',  constant: "0.0144", pcs: 216 },
   { key: "1",    label: '1"',    constant: "0.0144", pcs: 144 },
+  { key: "1.5",  label: '1.5"',  constant: "0.0144", pcs: 96  },
   { key: "2",    label: '2"',    constant: "0.0144", pcs: 72  },
   { key: "2.5",  label: '2.5"',  constant: "0.015",  pcs: 60  },
   { key: "3",    label: '3"',    constant: "0.0144", pcs: 48  },
@@ -68,12 +69,14 @@ function ResultRow({ label, value, highlight = false, sub = false }: {
 }) {
   return (
     <div className={`flex items-center justify-between px-4 py-2.5 border-b border-gray-100 last:border-b-0 ${
-      highlight ? "bg-brand-50 border-l-4 border-brand-400" : sub ? "bg-gray-50" : "bg-white"
+      highlight ? "bg-brand-50/60 border-l-[3px] border-brand-400"
+        : sub ? "bg-gray-50/60"
+        : "bg-white"
     }`}>
-      <span className={`text-sm ${highlight ? "font-bold text-brand-800" : sub ? "text-gray-500" : "text-gray-700"}`}>
+      <span className={`text-sm ${highlight ? "font-semibold text-brand-900" : sub ? "text-gray-500" : "text-gray-700"}`}>
         {label}
       </span>
-      <span className={`font-semibold tabular-nums ${highlight ? "text-brand-700 text-base" : "text-sm text-gray-900"}`}>
+      <span className={`tabular-nums ${highlight ? "font-bold text-brand-700 text-base" : "font-semibold text-sm text-gray-900"}`}>
         ₹{value}
       </span>
     </div>
@@ -149,23 +152,54 @@ export default function CalculatorPage() {
   }
 
   return (
-    <div className="calc-page max-w-4xl mx-auto space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-          <Calculator className="w-5 h-5 text-brand-500" />
-          BOPP Tape Box Price Calculator
-        </h1>
+    <div className="calc-page max-w-5xl mx-auto space-y-4">
+      <div className="flex items-end justify-between gap-4 flex-wrap pb-2 border-b border-gray-200">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-semibold text-gray-900 tracking-tight flex items-center gap-2">
+            <span className="w-9 h-9 rounded-lg bg-brand-50 ring-1 ring-brand-100 flex items-center justify-center">
+              <Calculator className="w-5 h-5 text-brand-600" />
+            </span>
+            BOPP Tape Calculator
+          </h1>
+          <p className="text-xs text-gray-500 mt-1">
+            Box price from raw material cost. Pick width → constant + pcs auto-fill.
+          </p>
+        </div>
         <button onClick={reset}
-          className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50">
+          className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-gray-700 bg-white hover:bg-gray-50 rounded-lg ring-1 ring-gray-200 transition-colors">
           <RefreshCw className="w-3.5 h-3.5" /> Reset
         </button>
+      </div>
+
+      {/* ── HERO price bar ─────────────────────────────────────── */}
+      <div className="bg-gradient-to-br from-brand-600 to-brand-700 rounded-xl p-5 text-white shadow-sm">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div className="min-w-0">
+            <p className="text-[10px] uppercase tracking-wider font-bold text-brand-100/80">
+              Full Box Price · incl. {gst}% GST
+            </p>
+            <p className="text-3xl font-bold tabular-nums mt-1 leading-tight">
+              ₹{fmt(results.priceIncl)}
+            </p>
+            <div className="flex items-center gap-2 mt-1.5 text-[11px] text-brand-100">
+              <span className="tabular-nums">₹{fmt(results.rollIncl)} / roll</span>
+              <span className="text-brand-200/60">·</span>
+              <span className="tabular-nums">{pcs} rolls / box</span>
+            </div>
+          </div>
+          <div className="text-right flex-shrink-0">
+            <p className="text-[10px] uppercase tracking-wider font-bold text-brand-100/80">Half Box</p>
+            <p className="text-xl font-bold tabular-nums mt-1 leading-tight">₹{fmt(results.halfIncl)}</p>
+            <p className="text-[11px] text-brand-100 mt-0.5 tabular-nums">{Math.floor(pcs / 2)} rolls</p>
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
         {/* ── INPUTS ── */}
         <div className="lg:col-span-1 bg-white rounded-xl border border-gray-200 p-4 space-y-4">
-          <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Inputs</p>
+          <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Inputs</p>
 
           {/* Width — auto-sets constant & pcs */}
           <div>
@@ -178,52 +212,47 @@ export default function CalculatorPage() {
             </select>
           </div>
 
-          {/* Constant — editable, auto-filled by width */}
           <div>
             <label className="block text-xs font-semibold text-gray-600 mb-1">
               Constant
               <span className="ml-1 text-[10px] text-gray-400 font-normal">(auto from width, editable)</span>
             </label>
             <input
-              type="text"
-              inputMode="decimal"
+              type="text" inputMode="decimal"
               value={constant}
               onChange={(e) => setConstant(e.target.value)}
               onBlur={(e) => { if (!e.target.value) setConstant("0"); }}
-              className="w-full px-3 py-2.5 text-sm border border-brand-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-brand-50"
+              className="w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white tabular-nums"
             />
-            <p className="text-[10px] text-gray-400 mt-0.5">0.0144 for most sizes · 0.015 for 2.5&quot;</p>
+            <p className="text-[10px] text-gray-400 mt-0.5">0.0144 for 0.5&quot;/0.75&quot;/1&quot;/1.5&quot;/2&quot;/3&quot; · 0.015 for 2.5&quot;</p>
           </div>
 
-          {/* Micron — free text */}
           <div>
             <label className="block text-xs font-semibold text-gray-600 mb-1">
               Micron Value
               <span className="ml-1 text-[10px] text-gray-400 font-normal">(see reference table →)</span>
             </label>
             <input
-              type="text"
-              inputMode="decimal"
+              type="text" inputMode="decimal"
               value={micron}
               onChange={(e) => setMicron(e.target.value)}
               onBlur={(e) => { if (e.target.value === "" || e.target.value === "-") setMicron("0"); }}
-              className="w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white"
+              className="w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white tabular-nums"
             />
           </div>
 
-          <NumInput label="Price per Kg (₹)"    value={pricePerKg}     onChange={setPricePerKg}     hint="Base raw material price"    />
+          <NumInput label="Price per Kg (₹)"     value={pricePerKg}     onChange={setPricePerKg}     hint="Base raw material price"    />
           <NumInput label="Customization (₹/kg)" value={customization}  onChange={setCustomization}  hint="Extra cost added to base"   />
-          <NumInput label="Length (m)"            value={length}         onChange={setLength}         hint="Tape length per roll"       />
+          <NumInput label="Length (m)"           value={length}         onChange={setLength}         hint="Tape length per roll"       />
           <NumInput label="Production Cost (₹)"  value={productionCost} onChange={setProductionCost} hint="Overheads + profit per box" />
-          <NumInput label="Freight (₹)"           value={freight}        onChange={setFreight}        hint="Freight per box"            />
-          <NumInput label="GST %"                 value={gst}            onChange={setGst}            />
-          <NumInput label="Cash Discount %"       value={cashPercent}    onChange={setCashPercent}    hint="On top of excl. GST price"  />
+          <NumInput label="Freight (₹)"          value={freight}        onChange={setFreight}        hint="Freight per box"            />
+          <NumInput label="GST %"                value={gst}            onChange={setGst}            />
+          <NumInput label="Cash Discount %"      value={cashPercent}    onChange={setCashPercent}    hint="On top of excl. GST price"  />
 
-          {/* Pcs (read-only, driven by width) */}
           <div>
             <label className="block text-xs font-semibold text-gray-600 mb-1">Pcs per Box</label>
             <input readOnly value={pcs}
-              className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg bg-gray-50 text-gray-500 cursor-default" />
+              className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg bg-gray-50 text-gray-500 cursor-default tabular-nums" />
             <p className="text-[10px] text-gray-400 mt-0.5">Set automatically by width</p>
           </div>
         </div>
@@ -232,13 +261,13 @@ export default function CalculatorPage() {
         <div className="lg:col-span-1 space-y-3">
           <div className="bg-gray-50 rounded-xl border border-gray-200 px-4 py-3 text-xs text-gray-500 space-y-1">
             <div className="flex justify-between">
-              <span>Constant</span><span className="font-semibold text-gray-700">{constant}</span>
+              <span>Constant</span><span className="font-semibold text-gray-700 tabular-nums">{constant}</span>
             </div>
             <div className="flex justify-between">
-              <span>Micron value</span><span className="font-semibold text-gray-700">{micron}</span>
+              <span>Micron value</span><span className="font-semibold text-gray-700 tabular-nums">{micron}</span>
             </div>
             <div className="flex justify-between">
-              <span>Pcs / Box</span><span className="font-semibold text-gray-700">{pcs}</span>
+              <span>Pcs / Box</span><span className="font-semibold text-gray-700 tabular-nums">{pcs}</span>
             </div>
           </div>
 

@@ -1,36 +1,56 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "next/navigation";
-import Link from "next/link";
+import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Download, Loader2, Printer } from "lucide-react";
-import { formatDate, getProductCategoryLabel, safeParseJSON } from "@/lib/utils";
+import { formatDate, getProductCategoryLabel, safeParseJSON, extractQuantity as extractQty } from "@/lib/utils";
 import toast, { Toaster } from "react-hot-toast";
 
-const QUANTITY_KEY: Record<string, string> = {
-  BOPP_TAPE:           "boxes",
-  BOPP_JUMBO:          "quantity",
-  THERMAL_ROLL:        "boxes",
-  BARCODE_LABEL:       "quantity",
-  COMPUTER_STATIONERY: "packets",
-};
-
+// Quantity detection now lives in lib/utils so it works for built-ins AND custom products.
 function extractQuantity(category: string, details: Record<string, string>) {
-  const key = QUANTITY_KEY[category] || "";
-  return key ? (details[key] || "") : "";
+  return extractQty(category, details).value;
+}
+function extractQuantityKey(category: string, details: Record<string, string>) {
+  return extractQty(category, details).key;
 }
 
-const HEADER_BG = "linear-gradient(135deg, #0d2b1a 0%, #1a5233 100%)";
-const ACCENT     = "#1a5233";
-const ACCENT_MID = "#2d7a4f";
+const ACCENT      = "#16a34a";   // brand green (matches Tailwind brand-500)
+const ACCENT_DARK = "#15803d";
+const TEXT_MUTED  = "#6b7280";
+const TEXT_DIM    = "#9ca3af";
+const BORDER      = "#e5e7eb";
+const BG_SOFT     = "#f9fafb";
 
 export default function OrderSharePage() {
   const { id } = useParams();
+  const router = useRouter();
   const [order, setOrder]       = useState<any>(null);
   const [loading, setLoading]   = useState(true);
   const [logoSrc, setLogoSrc]   = useState<string>("/ambiance-logo.png");
   const [activeAction, setActiveAction] = useState<"download" | null>(null);
   const formRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [previewScale, setPreviewScale] = useState(1);
+  const [previewHeight, setPreviewHeight] = useState<number | null>(null);
+
+  // Scale the A4 preview to fit narrow screens. The captured element stays
+  // at 210mm so the generated PDF is unaffected.
+  useEffect(() => {
+    const A4_PX = 793.7; // 210mm @ 96 dpi
+    const recalc = () => {
+      if (!stageRef.current || !formRef.current) return;
+      const stageW = stageRef.current.offsetWidth;
+      const scale = Math.min(1, stageW / A4_PX);
+      setPreviewScale(scale);
+      setPreviewHeight(formRef.current.scrollHeight * scale);
+    };
+    recalc();
+    const ro = new ResizeObserver(recalc);
+    if (stageRef.current) ro.observe(stageRef.current);
+    if (formRef.current) ro.observe(formRef.current);
+    window.addEventListener("resize", recalc);
+    return () => { ro.disconnect(); window.removeEventListener("resize", recalc); };
+  }, [order]);
 
   // Preload logo as base64 on mount so html2canvas never makes an HTTP request for it
   useEffect(() => {
@@ -56,37 +76,77 @@ export default function OrderSharePage() {
     const html2canvas = (await import("html2canvas")).default;
     const { jsPDF }   = await import("jspdf");
 
-    // logoSrc is already a base64 data URL (set on mount), so html2canvas
-    // renders it instantly with no network requests — no more infinite hang
-    const canvas = await html2canvas(formRef.current, {
+    // Capture a DEEP CLONE in an off-screen sandbox instead of the live node.
+    // The previous approach (toggling the on-screen form's transform / parent
+    // clip) still leaked layout quirks from the mobile preview into the PDF
+    // — flex baselines + the scaled parent shifted text downward. Cloning the
+    // form into a dedicated fixed-width host removes every external influence:
+    // the clone has no scaling, no viewport-dependent CSS, no scrolled
+    // ancestors. html2canvas then sees exactly the A4 layout the PDF needs.
+    const PX_PER_MM = 96 / 25.4;           // 3.7795… — CSS px per mm at 96 dpi
+    const A4_WIDTH_PX  = Math.round(210 * PX_PER_MM); // 794
+    const A4_HEIGHT_PX = Math.round(297 * PX_PER_MM); // 1123
+
+    const sandbox = document.createElement("div");
+    sandbox.style.cssText = [
+      "position: fixed",
+      "top: 0",
+      // Off-screen but still in the layout tree so html2canvas can measure it.
+      "left: -10000px",
+      `width: ${A4_WIDTH_PX}px`,
+      "background: #ffffff",
+      "pointer-events: none",
+      "z-index: -1",
+    ].join(";");
+
+    const clone = formRef.current.cloneNode(true) as HTMLDivElement;
+    // Strip every layout-affecting style we set for the on-screen preview so
+    // the clone renders at its natural A4 dimensions.
+    clone.style.transform = "none";
+    clone.style.transformOrigin = "top left";
+    clone.style.width = "210mm";
+    clone.style.minHeight = "297mm";
+    clone.style.margin = "0";
+    clone.style.boxShadow = "none";
+
+    sandbox.appendChild(clone);
+    document.body.appendChild(sandbox);
+    // Two animation frames give the cloned subtree time to fully paint at the
+    // new width before html2canvas measures — one frame for layout, one for
+    // images/fonts to flush.
+    await new Promise((r) => requestAnimationFrame(() => r(null)));
+    await new Promise((r) => requestAnimationFrame(() => r(null)));
+
+    const canvas = await html2canvas(clone, {
       scale: 2,
-      useCORS: false,        // not needed — no external URLs in the DOM
+      useCORS: false,
       allowTaint: true,
       backgroundColor: "#ffffff",
       logging: false,
       removeContainer: true,
-      // Prevent scroll position from shifting the captured content
       scrollX: 0,
-      scrollY: -window.scrollY,
-      windowWidth: document.documentElement.scrollWidth,
+      scrollY: 0,
+      windowWidth: A4_WIDTH_PX,
+      // Snap to whole A4 pages so the captured strip lines up exactly with
+      // the printed pages — partial pages were leaving a gap at the bottom
+      // and pushing the next page's content downward.
+      windowHeight: Math.max(clone.scrollHeight, A4_HEIGHT_PX),
     });
 
-    const imgData = canvas.toDataURL("image/png");
-    const pdf     = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-    const pageW   = pdf.internal.pageSize.getWidth();
-    const pageH   = pdf.internal.pageSize.getHeight();
-    const imgH    = (canvas.height * pageW) / canvas.width;
+    document.body.removeChild(sandbox);
 
-    // Always start from top of page — vertical centering pushed content toward bottom
-    const yOffset = 0;
+    // Now turn the captured PNG into A4 pages. Pixel → mm conversion uses the
+    // canvas's actual ratio so the height we hand to addImage matches reality.
+    const pdf   = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const pageW = pdf.internal.pageSize.getWidth();   // 210
+    const pageH = pdf.internal.pageSize.getHeight();  // 297
+    const imgH  = (canvas.height * pageW) / canvas.width;
+    const imgData = canvas.toDataURL("image/png");
 
     let yPos = 0, remaining = imgH;
     while (remaining > 0) {
       if (yPos > 0) pdf.addPage();
-      // On the first page, we apply yOffset if it's shorter than pageH
-      // On subsequent pages, we always start from the top (-yPos)
-      const currentY = yPos === 0 ? yOffset : -yPos;
-      pdf.addImage(imgData, "PNG", 0, currentY, pageW, imgH);
+      pdf.addImage(imgData, "PNG", 0, -yPos, pageW, imgH);
       yPos += pageH;
       remaining -= pageH;
     }
@@ -145,33 +205,63 @@ const handleDownload = async () => {
   const isGenerating = activeAction !== null;
 
   const colDefs = [
-    "28px",
-    "1fr",
-    "1.8fr",
-    "60px",
+    "32px",
+    "1.1fr",
+    "1.9fr",
+    "64px",
     ...(hasRate ? ["90px"] : []),
     ...(hasGst  ? ["56px"] : []),
   ];
   const gridCols = colDefs.join(" ");
 
+  // Compute total if rates exist (subtotal · gst · grand total)
+  let subtotal = 0, gstTotal = 0;
+  if (hasRate) {
+    for (const item of orderItems) {
+      const d = safeParseJSON(item.productDetails);
+      const qty = parseFloat(extractQuantity(item.productCategory, d) || "0") || 0;
+      const rate = parseFloat(item.rate || 0) || 0;
+      const lineTotal = qty * rate;
+      subtotal += lineTotal;
+      if (item.gst) gstTotal += lineTotal * (parseFloat(item.gst) / 100);
+    }
+  }
+  const grandTotal = subtotal + gstTotal;
+  const fmtINR = (n: number) => `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
   return (
-    <div className="max-w-2xl mx-auto pb-12">
+    <div className="max-w-[820px] mx-auto pb-12 px-3 sm:px-0">
       <Toaster position="top-center" />
       <style>{`
         @media print {
-          @page { size: A5; margin: 8mm; }
+          @page { size: A4; margin: 0; }
           body * { visibility: hidden; }
           #order-form-print, #order-form-print * { visibility: visible; }
-          #order-form-print { position: fixed; top: 0; left: 0; width: 100%; }
+          #order-form-print { position: fixed; top: 0; left: 0; width: 210mm !important; box-shadow: none !important; }
           .no-print { display: none !important; }
         }
       `}</style>
 
       {/* Controls */}
       <div className="flex items-center gap-2 mb-5 flex-wrap no-print">
-        <Link href={`/orders/${id}`} className="p-2 hover:bg-gray-100 rounded-lg">
+        {/* Use router.back() instead of a Link to /orders/[id] — a Link calls
+            router.push and adds a new history entry, which combined with the
+            detail page's back arrow (also router.back) created an infinite
+            bounce between detail and share. router.back pops correctly. */}
+        <button
+          type="button"
+          onClick={() => {
+            if (typeof window !== "undefined" && window.history.length > 1) {
+              router.back();
+            } else {
+              router.push(`/orders/${id}`);
+            }
+          }}
+          className="p-2 hover:bg-gray-100 rounded-lg"
+          aria-label="Back"
+        >
           <ArrowLeft className="w-5 h-5 text-gray-600" />
-        </Link>
+        </button>
         <h1 className="text-lg font-bold text-gray-900 mr-auto">Order Form</h1>
 
 <button onClick={handleDownload} disabled={isGenerating}
@@ -191,184 +281,279 @@ const handleDownload = async () => {
         <p className="no-print text-center text-sm text-gray-400 mb-3 animate-pulse">Generating PDF…</p>
       )}
 
-      {/* ORDER FORM — captured to PDF */}
-      <div id="order-form-print" ref={formRef} style={{ fontFamily: "'Helvetica Neue', Arial, sans-serif", color: "#111", background: "#fff" }}>
+      {/* ORDER FORM — captured to PDF (constrained to A4 width so the on-screen
+          preview matches the PDF and the print version 1:1). The outer stage
+          scales the preview down to viewport width on mobile while the inner
+          stays at exactly 210mm so PDF capture is unaffected. */}
+      <div
+        ref={stageRef}
+        className="pdf-stage"
+        style={{
+          width: "100%",
+          maxWidth: "210mm",
+          margin: "0 auto",
+          height: previewHeight ?? undefined,
+          overflow: "hidden",
+          position: "relative",
+        }}
+      >
+      <div
+        id="order-form-print"
+        ref={formRef}
+        style={{
+          fontFamily: "'Helvetica Neue', 'Inter', Arial, sans-serif",
+          color: "#111827",
+          background: "#fff",
+          fontFeatureSettings: "'tnum' 1, 'lnum' 1",
+          width: "210mm",
+          minHeight: "297mm",
+          margin: "0",
+          transform: `scale(${previewScale})`,
+          transformOrigin: "top left",
+          boxShadow: "0 1px 3px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04)",
+        }}
+      >
+        {/* Top accent strip */}
+        <div style={{ height: 6, background: ACCENT }} />
 
         {/* HEADER */}
-        <div style={{ background: HEADER_BG, padding: "20px 24px", color: "#fff" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
-
-            <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}>
-              {/* logoSrc is base64 by the time PDF is generated — no CORS, no hang */}
+        <div style={{ padding: "28px 32px 24px", borderBottom: `1px solid ${BORDER}` }}>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 32 }}>
+            {/* Company block */}
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 14, flex: "1 1 0", minWidth: 0 }}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={logoSrc}
                 alt="Ambiance"
-                style={{ height: 44, width: "auto", objectFit: "contain", flexShrink: 0 }}
+                style={{ height: 56, width: "auto", objectFit: "contain", flexShrink: 0, marginTop: 2 }}
               />
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.2 }}>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 17, fontWeight: 700, lineHeight: 1.15, letterSpacing: "-0.3px", color: "#0f172a" }}>
                   Ambiance Printing &amp; Packaging
                 </div>
-                <div style={{ fontSize: 9.5, opacity: 0.78, marginTop: 4, lineHeight: 1.55 }}>
+                <div style={{ fontSize: 10, color: TEXT_MUTED, marginTop: 6, lineHeight: 1.55 }}>
                   Mandebar Road, Vill. Kheri Rangran<br />
                   Yamunanagar, Haryana (India) 135001
                 </div>
-                <div style={{ fontSize: 9, opacity: 0.68, marginTop: 2 }}>
+                <div style={{ fontSize: 9.5, color: TEXT_DIM, marginTop: 3, lineHeight: 1.4 }}>
                   info@pakzy3s.com &nbsp;·&nbsp; ambianceynr@gmail.com
                 </div>
               </div>
             </div>
 
-            <div style={{ flexShrink: 0, textAlign: "center",
-              background: "rgba(255,255,255,0.14)",
-              border: "1px solid rgba(255,255,255,0.35)",
-              borderRadius: 10, padding: "10px 20px",
-            }}>
-              <div style={{ fontSize: 8.5, fontWeight: 600, opacity: 0.72, textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 4 }}>
-                Order ID
+            {/* Doc badge */}
+            <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "flex-end", justifyContent: "flex-start", paddingTop: 2 }}>
+              <div style={{
+                display: "inline-block", padding: "4px 10px",
+                background: BG_SOFT, color: ACCENT_DARK,
+                fontSize: 9, fontWeight: 700, letterSpacing: 1.5,
+                borderRadius: 4, textTransform: "uppercase" as const,
+                border: `1px solid ${BORDER}`,
+                lineHeight: 1.2,
+              }}>
+                Order Form
               </div>
-              <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: "-0.4px", lineHeight: 1 }}>
+              <div style={{ fontSize: 28, fontWeight: 700, letterSpacing: "-0.7px", color: "#0f172a", marginTop: 8, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
                 {formattedId}
+              </div>
+              <div style={{ fontSize: 10, color: TEXT_MUTED, marginTop: 6, lineHeight: 1.2 }}>
+                {formatDate(order.createdAt)}
               </div>
             </div>
           </div>
         </div>
 
         {/* BODY */}
-        <div style={{ padding: "22px 24px" }}>
+        <div style={{ padding: "24px 32px" }}>
 
-          {/* Meta strip */}
-          <div style={{ display: "flex", flexWrap: "wrap", marginBottom: 20, border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
-            {([
-              { label: "ORDER DATE",  value: formatDate(order.createdAt) },
-              order.deliveryDeadline  ? { label: "DELIVERY BY", value: formatDate(order.deliveryDeadline) } : null,
-              order.customer?.partyName ? { label: "PARTY",    value: order.customer.partyName } : null,
-              order.customer?.location  ? { label: "LOCATION", value: order.customer.location }  : null,
-            ] as any[]).filter(Boolean).map((cell: any, i: number) => (
-              <div key={i} style={{
-                flex: "1 1 40%", padding: "10px 14px",
-                background: i % 2 === 0 ? "#f9fafb" : "#fff",
-                borderRight: "1px solid #e5e7eb",
-                borderBottom: "1px solid #e5e7eb",
-              }}>
-                <div style={{ fontSize: 8, fontWeight: 600, color: "#6b7280", letterSpacing: 0.8, marginBottom: 2, textTransform: "uppercase" }}>
-                  {cell.label}
-                </div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#111827" }}>{cell.value}</div>
-              </div>
-            ))}
-          </div>
-
-          {/* Table header */}
+          {/* Bill To + meta — two equal-height columns separated by a hairline */}
           <div style={{
-            display: "grid", gridTemplateColumns: gridCols, gap: "0 8px",
-            background: ACCENT, color: "#fff",
-            padding: "9px 14px", borderRadius: "8px 8px 0 0",
-            fontSize: 9.5, fontWeight: 600,
-            textTransform: "uppercase" as const, letterSpacing: 0.5,
+            display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginBottom: 24,
+            paddingBottom: 18, borderBottom: `1px solid ${BORDER}`,
           }}>
-            <div style={{ width: "100%" }}>#</div>
-            <div style={{ width: "100%" }}>Product</div>
-            <div style={{ width: "100%" }}>Specifications</div>
-            <div style={{ textAlign: "center", width: "100%" }}>Qty</div>
-            {hasRate && <div style={{ textAlign: "right", width: "100%" }}>Price</div>}
-            {hasGst  && <div style={{ textAlign: "right", width: "100%" }}>GST %</div>}
+            <div>
+              <div style={{ fontSize: 8.5, fontWeight: 700, color: TEXT_MUTED, letterSpacing: 1.2, marginBottom: 6, textTransform: "uppercase" as const }}>
+                Bill To
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", lineHeight: 1.3 }}>
+                {order.customer?.partyName || "—"}
+              </div>
+              {order.customer?.location && (
+                <div style={{ fontSize: 10.5, color: TEXT_MUTED, marginTop: 4, lineHeight: 1.4 }}>
+                  {order.customer.location}
+                </div>
+              )}
+            </div>
+            <div>
+              <div style={{ display: "grid", gridTemplateColumns: "max-content 1fr", columnGap: 16, rowGap: 6, alignItems: "baseline" }}>
+                {order.deliveryDeadline && (
+                  <>
+                    <div style={{ fontSize: 8.5, fontWeight: 700, color: TEXT_MUTED, letterSpacing: 1.2, textTransform: "uppercase" as const }}>
+                      Delivery By
+                    </div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a", textAlign: "right" }}>
+                      {formatDate(order.deliveryDeadline)}
+                    </div>
+                  </>
+                )}
+                {order.priority === "URGENT" && (
+                  <>
+                    <div style={{ fontSize: 8.5, fontWeight: 700, color: TEXT_MUTED, letterSpacing: 1.2, textTransform: "uppercase" as const }}>
+                      Priority
+                    </div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#dc2626", textAlign: "right" }}>
+                      URGENT
+                    </div>
+                  </>
+                )}
+                {order.createdBy && (
+                  <>
+                    <div style={{ fontSize: 8.5, fontWeight: 700, color: TEXT_MUTED, letterSpacing: 1.2, textTransform: "uppercase" as const }}>
+                      Placed By
+                    </div>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: "#374151", textAlign: "right" }}>
+                      {order.createdBy.name}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
           </div>
 
-          {/* Table rows */}
-          {(orderItems.length > 0 ? orderItems : [{ _legacy: true }]).map((item: any, idx: number) => {
-            const isLegacy = item._legacy;
-            const category = isLegacy ? order.productCategory : item.productCategory;
-            const d: Record<string, string> = isLegacy
-              ? safeParseJSON(order.productDetails)
-              : safeParseJSON(item.productDetails);
+          {/* Items table */}
+          <div style={{ border: `1px solid ${BORDER}`, borderRadius: 8, overflow: "hidden" }}>
+            {/* Header */}
+            <div style={{
+              display: "grid", gridTemplateColumns: gridCols, gap: "0 10px",
+              background: BG_SOFT, color: "#374151",
+              padding: "10px 16px",
+              fontSize: 9, fontWeight: 700,
+              textTransform: "uppercase" as const, letterSpacing: 0.8,
+              borderBottom: `1px solid ${BORDER}`,
+            }}>
+              <div style={{ width: "100%" }}>#</div>
+              <div style={{ width: "100%" }}>Product</div>
+              <div style={{ width: "100%" }}>Specifications</div>
+              <div style={{ textAlign: "center", width: "100%" }}>Qty</div>
+              {hasRate && <div style={{ textAlign: "right", width: "100%" }}>Rate</div>}
+              {hasGst  && <div style={{ textAlign: "right", width: "100%" }}>GST</div>}
+            </div>
 
-            const qty  = extractQuantity(category, d);
-            const qKey = QUANTITY_KEY[category] || "";
-            const specPairs = Object.entries(d)
-              .filter(([k, v]) => v && k !== qKey)
-              .map(([k, v]) => {
-                const lbl = k.replace(/([A-Z])/g, " $1").replace(/^./, s => s.toUpperCase());
-                return `${lbl}: ${v}`;
-              });
+            {/* Rows */}
+            {(orderItems.length > 0 ? orderItems : [{ _legacy: true }]).map((item: any, idx: number, arr: any[]) => {
+              const isLegacy = item._legacy;
+              const category = isLegacy ? order.productCategory : item.productCategory;
+              const d: Record<string, string> = isLegacy
+                ? safeParseJSON(order.productDetails)
+                : safeParseJSON(item.productDetails);
 
-            return (
-              <div key={item.id || "legacy"} style={{
-                display: "grid", gridTemplateColumns: gridCols, gap: "0 8px",
-                padding: "11px 14px",
-                background: idx % 2 === 0 ? "#f9fafb" : "#fff",
-                borderBottom: "1px solid #e5e7eb",
-                borderLeft: "1px solid #e5e7eb",
-                borderRight: "1px solid #e5e7eb",
-                alignItems: "start",
-              }}>
-                <div style={{
-                  width: 19, height: 19, borderRadius: "50%",
-                  background: ACCENT_MID, color: "#fff",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 9, fontWeight: 700,
-                }}>{idx + 1}</div>
+              const qty  = extractQuantity(category, d);
+              const qKey = extractQuantityKey(category, d);
+              const specPairs = Object.entries(d)
+                .filter(([k, v]) => v && k !== qKey)
+                .map(([k, v]) => {
+                  const lbl = k.replace(/([A-Z])/g, " $1").replace(/^./, s => s.toUpperCase());
+                  return `${lbl}: ${v}`;
+                });
 
-                <div style={{ fontSize: 11.5, fontWeight: 600, color: ACCENT, paddingTop: 1 }}>
-                  {getProductCategoryLabel(category)}
-                </div>
-
-                <div style={{ fontSize: 10, color: "#374151", lineHeight: 1.75 }}>
-                  {specPairs.map((spec, si) => (
-                    <span key={si}>
-                      {si > 0 && <span style={{ color: "#d1d5db", margin: "0 4px" }}>|</span>}
-                      {spec}
-                    </span>
-                  ))}
-                </div>
-
-                <div style={{ fontSize: 11.5, fontWeight: 600, textAlign: "center", color: "#111827", paddingTop: 1, width: "100%" }}>
-                  {qty || "—"}
-                </div>
-
-                {hasRate && (
-                  <div style={{ fontSize: 11.5, fontWeight: 600, textAlign: "right", color: ACCENT, paddingTop: 1, width: "100%" }}>
-                    {item.rate ? `₹${Number(item.rate).toLocaleString("en-IN")}` : "—"}
+              return (
+                <div key={item.id || "legacy"} style={{
+                  display: "grid", gridTemplateColumns: gridCols, gap: "0 10px",
+                  padding: "13px 16px",
+                  borderBottom: idx === arr.length - 1 ? "none" : `1px solid ${BORDER}`,
+                  alignItems: "start",
+                  background: "#fff",
+                }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: TEXT_MUTED, paddingTop: 1 }}>
+                    {String(idx + 1).padStart(2, "0")}
                   </div>
-                )}
+
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a", paddingTop: 1, lineHeight: 1.3 }}>
+                    {getProductCategoryLabel(category)}
+                  </div>
+
+                  <div style={{ fontSize: 10, color: "#4b5563", lineHeight: 1.6 }}>
+                    {specPairs.length > 0 ? specPairs.map((spec, si) => (
+                      <span key={si}>
+                        {si > 0 && <span style={{ color: "#d1d5db", margin: "0 6px" }}>·</span>}
+                        {spec}
+                      </span>
+                    )) : <span style={{ color: TEXT_DIM }}>No specifications</span>}
+                  </div>
+
+                  <div style={{ fontSize: 12, fontWeight: 700, textAlign: "center", color: "#0f172a", paddingTop: 1, width: "100%" }}>
+                    {qty || "—"}
+                  </div>
+
+                  {hasRate && (
+                    <div style={{ fontSize: 11.5, fontWeight: 700, textAlign: "right", color: "#0f172a", paddingTop: 1, width: "100%" }}>
+                      {item.rate ? fmtINR(Number(item.rate)) : "—"}
+                    </div>
+                  )}
+                  {hasGst && (
+                    <div style={{ fontSize: 11.5, fontWeight: 600, textAlign: "right", color: "#374151", paddingTop: 1, width: "100%" }}>
+                      {item.gst ? `${item.gst}%` : "—"}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Totals (only when prices are set) */}
+          {hasRate && (
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+              <div style={{ minWidth: 240, fontSize: 11 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", color: TEXT_MUTED }}>
+                  <span>Subtotal</span>
+                  <span style={{ color: "#0f172a", fontWeight: 600 }}>{fmtINR(subtotal)}</span>
+                </div>
                 {hasGst && (
-                  <div style={{ fontSize: 11.5, fontWeight: 600, textAlign: "right", color: "#374151", paddingTop: 1, width: "100%" }}>
-                    {item.gst ? `${item.gst}%` : "—"}
+                  <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", color: TEXT_MUTED }}>
+                    <span>GST</span>
+                    <span style={{ color: "#0f172a", fontWeight: 600 }}>{fmtINR(gstTotal)}</span>
                   </div>
                 )}
+                <div style={{
+                  display: "flex", justifyContent: "space-between",
+                  padding: "10px 14px", marginTop: 4,
+                  background: ACCENT, color: "#fff",
+                  borderRadius: 6, fontSize: 13, fontWeight: 700,
+                }}>
+                  <span>Total</span>
+                  <span>{fmtINR(grandTotal)}</span>
+                </div>
               </div>
-            );
-          })}
-
-          <div style={{ height: 5, background: "#f9fafb", border: "1px solid #e5e7eb", borderTop: "none", borderRadius: "0 0 8px 8px", marginBottom: 20 }} />
-
-          {/* Remarks */}
-          {order.remarks && (
-            <div style={{ background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: 8, padding: "10px 14px", marginBottom: 20 }}>
-              <div style={{ fontSize: 8.5, fontWeight: 600, color: "#92400e", textTransform: "uppercase" as const, letterSpacing: 0.7, marginBottom: 3 }}>
-                Remarks / Notes
-              </div>
-              <div style={{ fontSize: 12, color: "#78350f" }}>{order.remarks}</div>
             </div>
           )}
 
-          {order.createdBy && (
-            <div style={{ fontSize: 10, color: "#9ca3af", marginBottom: 20 }}>
-              Order placed by <strong style={{ color: "#6b7280" }}>{order.createdBy.name}</strong> on {formatDate(order.createdAt)}
+          {/* Remarks */}
+          {order.remarks && (
+            <div style={{
+              marginTop: 24,
+              padding: "12px 16px",
+              background: BG_SOFT,
+              borderLeft: `3px solid ${ACCENT}`,
+              borderRadius: "0 6px 6px 0",
+            }}>
+              <div style={{ fontSize: 8.5, fontWeight: 700, color: ACCENT_DARK, textTransform: "uppercase" as const, letterSpacing: 1, marginBottom: 4 }}>
+                Notes
+              </div>
+              <div style={{ fontSize: 11, color: "#374151", lineHeight: 1.55 }}>{order.remarks}</div>
             </div>
           )}
 
           {/* Footer */}
-          <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 4 }}>
-            <div style={{ fontSize: 9, color: "#9ca3af" }}>
+          <div style={{ marginTop: 32, paddingTop: 14, borderTop: `1px solid ${BORDER}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+            <div style={{ fontSize: 9, color: TEXT_DIM }}>
               Ambiance Printing &amp; Packaging · Yamunanagar, Haryana 135001
             </div>
-            <div style={{ fontSize: 9, color: "#9ca3af" }}>
+            <div style={{ fontSize: 9, color: TEXT_DIM }}>
               info@pakzy3s.com · ambianceynr@gmail.com
             </div>
           </div>
         </div>
+      </div>
       </div>
     </div>
   );

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { formatDate } from "@/lib/utils";
+import { useScrollRestoration } from "@/lib/useScrollRestoration";
 import type { UserRole } from "@/types";
 import toast, { Toaster } from "react-hot-toast";
 import { PlusCircle, FileText, Search, Trash2, CheckSquare, Square } from "lucide-react";
@@ -20,6 +21,8 @@ export default function QuotationsPage() {
   const { data: session, status: sessionStatus } = useSession();
   const [quotations, setQuotations] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  // Restore scroll when returning from a quotation detail/edit.
+  useScrollRestoration(!loading);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());

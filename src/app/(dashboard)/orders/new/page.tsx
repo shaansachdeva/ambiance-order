@@ -4,12 +4,147 @@ import { useEffect, useRef, useState, Suspense } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import ProductForm from "@/components/ProductForm";
-import { PRODUCT_CATEGORIES } from "@/types";
 import type { UserRole, ProductCategory } from "@/types";
 import { hasPermission } from "@/lib/utils";
+import { useCategoryPicker, type PickerCategory } from "@/lib/useCategoryPicker";
 import toast, { Toaster } from "react-hot-toast";
-import { ArrowLeft, Send, Plus, Trash2, ChevronDown, ChevronUp, IndianRupee, ImagePlus, X, Search, Building2, MapPin, UserPlus, Check } from "lucide-react";
+import { ArrowLeft, Send, Plus, Trash2, ChevronDown, ChevronUp, IndianRupee, ImagePlus, X, Search, Building2, MapPin, UserPlus, Check, Package } from "lucide-react";
 import { useLanguage } from "@/contexts/LanguageContext";
+
+/**
+ * Unified searchable category picker — shows built-in and custom product
+ * categories in a single uniform list. Scales when there are many options.
+ */
+function CategoryPicker({
+  value,
+  categories,
+  onChange,
+  loaded,
+}: {
+  value: string;
+  categories: PickerCategory[];
+  onChange: (value: string) => void;
+  loaded: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [highlight, setHighlight] = useState(0);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  useEffect(() => {
+    if (open) setTimeout(() => inputRef.current?.focus(), 0);
+  }, [open]);
+
+  const selected = categories.find((c) => c.value === value) || null;
+  const q = search.trim().toLowerCase();
+  const filtered = q
+    ? categories.filter((c) => c.label.toLowerCase().includes(q) || c.value.toLowerCase().includes(q))
+    : categories;
+
+  return (
+    <div ref={boxRef} className="relative">
+      {selected && !open ? (
+        <button
+          type="button"
+          onClick={() => { setOpen(true); setSearch(""); setHighlight(0); }}
+          className="w-full flex items-center justify-between gap-2 px-3 py-2.5 bg-brand-50 border border-brand-200 ring-1 ring-brand-100 rounded-xl hover:border-brand-300 hover:bg-brand-100/60 transition-all active:scale-[0.99]"
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-brand-500 text-white flex items-center justify-center shrink-0 shadow-sm">
+              <Package className="w-4 h-4" />
+            </div>
+            <div className="min-w-0 text-left">
+              <p className="text-sm font-semibold text-gray-900 truncate">{selected.label}</p>
+              <p className="text-[11px] text-gray-500">Tap to change</p>
+            </div>
+          </div>
+          <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />
+        </button>
+      ) : (
+        <>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+            <input
+              ref={inputRef}
+              type="text"
+              value={search}
+              onFocus={() => { setOpen(true); setHighlight(0); }}
+              onChange={(e) => { setSearch(e.target.value); setOpen(true); setHighlight(0); }}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowDown") { e.preventDefault(); setOpen(true); setHighlight((h) => Math.min(filtered.length - 1, h + 1)); }
+                else if (e.key === "ArrowUp") { e.preventDefault(); setHighlight((h) => Math.max(0, h - 1)); }
+                else if (e.key === "Enter") {
+                  e.preventDefault();
+                  const pick = filtered[highlight];
+                  if (pick) { onChange(pick.value); setOpen(false); setSearch(""); }
+                } else if (e.key === "Escape") { setOpen(false); }
+              }}
+              placeholder={loaded ? (categories.length === 0 ? "No products yet — add one in Products" : "Search products...") : "Loading products..."}
+              className="w-full pl-9 pr-10 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 bg-white placeholder:text-gray-400 transition-all"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => { setSearch(""); setHighlight(0); }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          {open && (
+            <div className="absolute z-30 left-0 right-0 mt-1.5 bg-white border border-gray-200 rounded-xl shadow-lg ring-1 ring-gray-200/40 max-h-72 overflow-y-auto">
+              {filtered.length === 0 ? (
+                <div className="px-4 py-6 text-center">
+                  <div className="w-10 h-10 rounded-xl bg-gray-50 ring-1 ring-gray-100 flex items-center justify-center mx-auto mb-2">
+                    <Package className="w-5 h-5 text-gray-400" />
+                  </div>
+                  <p className="text-sm font-medium text-gray-700">
+                    {loaded ? (categories.length === 0 ? "No products yet" : "No matching products") : "Loading..."}
+                  </p>
+                  {loaded && categories.length === 0 && (
+                    <p className="text-xs text-gray-400 mt-0.5">Add products in the Products page</p>
+                  )}
+                </div>
+              ) : (
+                filtered.map((c, idx) => (
+                  <button
+                    key={c.value}
+                    type="button"
+                    onMouseEnter={() => setHighlight(idx)}
+                    onClick={() => { onChange(c.value); setOpen(false); setSearch(""); }}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors ${
+                      idx === highlight ? "bg-brand-50" : "hover:bg-gray-50"
+                    }`}
+                  >
+                    <div className="w-8 h-8 rounded-lg bg-gray-100 text-gray-700 flex items-center justify-center shrink-0">
+                      <Package className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{c.label}</p>
+                    </div>
+                    {c.value === value && <Check className="w-4 h-4 text-brand-500 shrink-0" />}
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
 
 interface Customer {
   id: string;
@@ -60,6 +195,9 @@ function NewOrderPageContent() {
   const customerBoxRef = useRef<HTMLDivElement>(null);
   const [newPartyName, setNewPartyName] = useState(partyParam || "");
   const [newPartyLocation, setNewPartyLocation] = useState("");
+  const [newPartyContactName, setNewPartyContactName] = useState("");
+  const [newPartyContactPhone, setNewPartyContactPhone] = useState("");
+  const [newPartyContactPosition, setNewPartyContactPosition] = useState("");
   const [showNewParty, setShowNewParty] = useState(initialNewPartyState);
   const [items, setItems] = useState<OrderItemData[]>([newItem()]);
   const [deliveryDeadline, setDeliveryDeadline] = useState("");
@@ -71,7 +209,7 @@ function NewOrderPageContent() {
   const [leadCompany, setLeadCompany] = useState("");
   const [isDirty, setIsDirty] = useState(false);
   const [customCategories, setCustomCategories] = useState<{ id: string; name: string; fields: string }[]>([]);
-  const [builtinOverrides, setBuiltinOverrides] = useState<Record<string, { hidden: boolean; label: string | null }>>({});
+  const { categories: allCategories, loaded: categoriesLoaded } = useCategoryPicker();
 
   const userRole = ((session?.user as any)?.role || "SALES") as UserRole;
   const customPermissions = (session?.user as any)?.customPermissions ?? null;
@@ -134,27 +272,13 @@ function NewOrderPageContent() {
     localStorage.setItem("order_draft", JSON.stringify(draft));
   }, [customerId, items, deliveryDeadline, remarks, priority, submitting, leadId]);
 
+  // Keep custom categories around for ProductForm field lookups (separate from picker list)
   useEffect(() => {
     fetch("/api/product-categories")
       .then((r) => r.json())
       .then((d) => setCustomCategories(Array.isArray(d) ? d : []))
       .catch(() => {});
-    fetch("/api/builtin-categories")
-      .then((r) => r.json())
-      .then((d) => {
-        if (!Array.isArray(d)) return;
-        const map: Record<string, { hidden: boolean; label: string | null }> = {};
-        for (const o of d) map[o.key] = { hidden: !!o.hidden, label: o.label ?? null };
-        setBuiltinOverrides(map);
-      })
-      .catch(() => {});
   }, []);
-
-  const visibleBuiltins = PRODUCT_CATEGORIES.filter((c) => !builtinOverrides[c.value]?.hidden);
-  const builtinLabelFor = (key: string): string => {
-    const override = builtinOverrides[key]?.label?.trim();
-    return override || tProduct(key);
-  };
 
   useEffect(() => {
     fetch("/api/customers")
@@ -264,12 +388,22 @@ function NewOrderPageContent() {
     return () => window.removeEventListener("beforeunload", handler);
   }, [isDirty]);
 
-  // Intercept browser back button when form is dirty
+  // Show the discard toast once when the user hits Back with a dirty form,
+  // then let further Back presses through. The previous implementation
+  // pushed history state on every popstate, which trapped users in a loop
+  // (Back bounced between this page and the next one and never reached the
+  // page they actually came from). The single intercept gives them a chance
+  // to confirm without taking over the history stack.
+  const backIntercepted = useRef(false);
   useEffect(() => {
-    if (!isDirty) return;
-    window.history.pushState(null, "", window.location.href);
+    if (!isDirty) { backIntercepted.current = false; return; }
+    // Push a single sentinel entry; on the first Back we eat it and warn.
+    window.history.pushState({ __dirtyGuard: true }, "", window.location.href);
     const handler = () => {
-      window.history.pushState(null, "", window.location.href);
+      if (backIntercepted.current) return;       // already prompted — let Back proceed
+      backIntercepted.current = true;
+      // Re-push so we're still on this page after the popstate has fired.
+      window.history.pushState({ __dirtyGuard: true }, "", window.location.href);
       showBackConfirm();
     };
     window.addEventListener("popstate", handler);
@@ -329,7 +463,13 @@ function NewOrderPageContent() {
       const res = await fetch("/api/customers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ partyName: newPartyName.trim(), location: newPartyLocation.trim() || null }),
+        body: JSON.stringify({
+          partyName: newPartyName.trim(),
+          location: newPartyLocation.trim() || null,
+          contactName: newPartyContactName.trim() || null,
+          contactPhone: newPartyContactPhone.trim() || null,
+          contactPosition: newPartyContactPosition.trim() || null,
+        }),
       });
       const newCustomer = await res.json();
       if (res.ok) {
@@ -337,6 +477,9 @@ function NewOrderPageContent() {
         setCustomerId(newCustomer.id);
         setNewPartyName("");
         setNewPartyLocation("");
+        setNewPartyContactName("");
+        setNewPartyContactPhone("");
+        setNewPartyContactPosition("");
         setShowNewParty(false);
         toast.success(`Party "${newCustomer.partyName}" added`);
       } else {
@@ -422,41 +565,73 @@ function NewOrderPageContent() {
   };
 
   if (sessionStatus === "loading") {
-    return <div className="h-48 bg-gray-200 rounded-xl animate-pulse" />;
+    return (
+      <div className="max-w-2xl mx-auto space-y-4">
+        <div className="h-20 bg-white rounded-2xl border border-gray-200/80 animate-pulse" />
+        <div className="h-48 bg-white rounded-2xl border border-gray-200/80 animate-pulse" />
+        <div className="h-64 bg-white rounded-2xl border border-gray-200/80 animate-pulse" />
+      </div>
+    );
   }
 
   return (
-    <div className="max-w-2xl mx-auto">
+    <div className="max-w-2xl mx-auto space-y-4 pb-24 md:pb-6">
       <Toaster position="top-right" />
 
-      {/* Header */}
-      <div className="flex items-center gap-3 mb-6">
-        <button
-          type="button"
-          onClick={() => isDirty ? showBackConfirm() : router.push("/orders")}
-          className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-        >
-          <ArrowLeft className="w-5 h-5 text-gray-600" />
-        </button>
-        <h1 className="text-xl font-bold text-gray-900">{leadId ? t("newOrder.confirmCreate") : t("newOrder.title")}</h1>
+      {/* ── Header card ─────────────────────────────────────────── */}
+      <div className="bg-white rounded-2xl border border-gray-200/80 p-3.5 sm:p-4">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => isDirty ? showBackConfirm() : router.push("/orders")}
+            className="p-2 -ml-1 hover:bg-gray-100 rounded-xl transition-colors active:scale-95"
+            aria-label="Back"
+          >
+            <ArrowLeft className="w-5 h-5 text-gray-600" />
+          </button>
+          <div className="flex-1 min-w-0">
+            <h1 className="text-lg sm:text-xl font-bold text-gray-900 tracking-tight">
+              {leadId ? t("newOrder.confirmCreate") : t("newOrder.title")}
+            </h1>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {items.length} item{items.length !== 1 ? "s" : ""}
+              {isDirty && (
+                <span className="ml-1.5 inline-flex items-center gap-1 text-amber-600 font-medium">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                  unsaved
+                </span>
+              )}
+            </p>
+          </div>
+        </div>
       </div>
 
-      {/* Draft restore banner — shown whenever a draft is found in localStorage */}
+      {/* ── Draft restore banner ─────────────────────────────── */}
       {draftBanner && !leadId && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-2">
-          <p className="text-sm font-semibold text-amber-800 mb-2">You have an unsaved draft from {draftBanner.savedAt ? new Date(draftBanner.savedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "earlier"}.</p>
-          <div className="flex gap-2">
+        <div className="bg-gradient-to-r from-amber-50 to-amber-50/40 border border-amber-200 rounded-2xl p-4 flex items-start justify-between gap-3 flex-wrap">
+          <div className="flex items-start gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-amber-100 ring-1 ring-amber-200 flex items-center justify-center flex-shrink-0">
+              <Send className="w-4 h-4 text-amber-700" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-amber-900">Unsaved Draft</p>
+              <p className="text-xs text-amber-700/90 mt-0.5">
+                Saved {draftBanner.savedAt ? new Date(draftBanner.savedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "earlier"}
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-2 flex-shrink-0">
             <button
               type="button"
               onClick={() => restoreDraft(draftBanner)}
-              className="px-3 py-1.5 text-xs font-semibold text-white bg-amber-600 rounded-lg hover:bg-amber-700"
+              className="px-3 py-1.5 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-lg transition-colors active:scale-[0.97]"
             >
-              Restore Draft
+              Restore
             </button>
             <button
               type="button"
               onClick={discardDraft}
-              className="px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-100 rounded-lg hover:bg-amber-200"
+              className="px-3 py-1.5 text-xs font-medium text-amber-800 bg-amber-100 hover:bg-amber-200 rounded-lg transition-colors active:scale-[0.97]"
             >
               Discard
             </button>
@@ -464,24 +639,34 @@ function NewOrderPageContent() {
         </div>
       )}
 
-      {/* Lead Conversion Banner */}
+      {/* ── Lead Conversion Banner ───────────────────────────── */}
       {leadId && (
-        <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 mb-2">
-          <p className="text-sm font-medium text-green-800">
-            📋 Converting lead: <span className="font-bold">{leadCompany || partyParam}</span>
-          </p>
-          <p className="text-xs text-green-600 mt-0.5">
-            Review the products below, make any changes to quantity or details, add more items if needed, then create the order.
-          </p>
+        <div className="bg-gradient-to-r from-emerald-50 to-emerald-50/40 border border-emerald-200 rounded-2xl p-4 flex items-start gap-3">
+          <div className="w-9 h-9 rounded-xl bg-emerald-100 ring-1 ring-emerald-200 flex items-center justify-center flex-shrink-0">
+            <Building2 className="w-4 h-4 text-emerald-700" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-emerald-900">
+              Converting lead: <span className="font-bold">{leadCompany || partyParam}</span>
+            </p>
+            <p className="text-xs text-emerald-700/90 mt-0.5">
+              Review the products below, make changes if needed, then create the order.
+            </p>
+          </div>
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Party Name */}
-        <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <label className="block text-sm font-semibold text-gray-900 mb-3">
-            {t("newOrder.partyName")}
-          </label>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {/* ── Party Name ─────────────────────────────────────── */}
+        <div className="bg-white rounded-2xl border border-gray-200/80 p-4 sm:p-5">
+          <div className="flex items-center gap-2.5 mb-3">
+            <div className="w-8 h-8 rounded-xl bg-brand-50 ring-1 ring-brand-100 flex items-center justify-center">
+              <Building2 className="w-4 h-4 text-brand-600" />
+            </div>
+            <label className="text-sm font-bold text-gray-900">
+              {t("newOrder.partyName")}
+            </label>
+          </div>
 
           {!showNewParty ? (() => {
             const selected = customers.find(c => c.id === customerId);
@@ -495,16 +680,18 @@ function NewOrderPageContent() {
             const showCreateRow = q.length > 0 && !exactMatch;
             const totalRows = filtered.length + (showCreateRow ? 1 : 0);
             return (
-              <div ref={customerBoxRef} className="relative">
+              <div ref={customerBoxRef} className="relative flex items-stretch gap-2">
+                {/* Picker takes the rest of the row; "+" button sits on the side. */}
+                <div className="flex-1 min-w-0 relative">
                 {selected && !customerDropdownOpen ? (
                   /* Selected chip */
                   <button
                     type="button"
                     onClick={() => { setCustomerDropdownOpen(true); setCustomerSearch(""); setCustomerHighlight(0); }}
-                    className="w-full flex items-center justify-between gap-2 px-3 py-2.5 bg-brand-50 border-2 border-brand-300 rounded-lg hover:border-brand-400 transition-colors group"
+                    className="w-full flex items-center justify-between gap-2 px-3 py-2.5 bg-brand-50 border border-brand-200 ring-1 ring-brand-100 rounded-xl hover:border-brand-300 hover:bg-brand-100/60 transition-all group active:scale-[0.99]"
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="w-8 h-8 rounded-full bg-brand-500 text-white flex items-center justify-center text-xs font-bold shrink-0">
+                      <div className="w-9 h-9 rounded-xl bg-brand-500 text-white flex items-center justify-center text-sm font-bold shrink-0 shadow-sm">
                         {selected.partyName.charAt(0).toUpperCase()}
                       </div>
                       <div className="flex-1 min-w-0 text-left">
@@ -521,7 +708,7 @@ function NewOrderPageContent() {
                       tabIndex={0}
                       onClick={(e) => { e.stopPropagation(); setIsDirty(true); setCustomerId(""); setCustomerSearch(""); setCustomerDropdownOpen(true); }}
                       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); setIsDirty(true); setCustomerId(""); setCustomerSearch(""); setCustomerDropdownOpen(true); } }}
-                      className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-white rounded-lg shrink-0 cursor-pointer"
+                      className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-white rounded-lg shrink-0 cursor-pointer transition-colors"
                       aria-label="Clear selection"
                     >
                       <X className="w-4 h-4" />
@@ -553,26 +740,28 @@ function NewOrderPageContent() {
                           }
                         }}
                         placeholder={customersLoaded ? (customers.length === 0 ? "No parties yet — type to add new" : "Search or add new party...") : "Loading parties..."}
-                        className="w-full pl-9 pr-10 py-2.5 text-sm border-2 border-gray-300 rounded-lg focus:outline-none focus:border-brand-500 bg-white"
+                        className="w-full pl-9 pr-10 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 bg-white placeholder:text-gray-400 transition-all"
                       />
                       {customerSearch && (
                         <button
                           type="button"
                           onClick={() => { setCustomerSearch(""); setCustomerHighlight(0); }}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 text-gray-400 hover:text-gray-700"
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg"
                         >
-                          <X className="w-4 h-4" />
+                          <X className="w-3.5 h-3.5" />
                         </button>
                       )}
                     </div>
 
                     {/* Dropdown list */}
                     {customerDropdownOpen && (
-                      <div className="absolute z-20 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-72 overflow-y-auto">
+                      <div className="absolute z-30 left-0 right-0 mt-1.5 bg-white border border-gray-200 rounded-xl shadow-lg ring-1 ring-gray-200/40 max-h-72 overflow-y-auto">
                         {filtered.length === 0 && !showCreateRow && (
                           <div className="px-4 py-6 text-center">
-                            <Building2 className="w-6 h-6 text-gray-300 mx-auto mb-1.5" />
-                            <p className="text-sm text-gray-500">
+                            <div className="w-10 h-10 rounded-xl bg-gray-50 ring-1 ring-gray-100 flex items-center justify-center mx-auto mb-2">
+                              <Building2 className="w-5 h-5 text-gray-400" />
+                            </div>
+                            <p className="text-sm font-medium text-gray-700">
                               {customersLoaded ? (customers.length === 0 ? "No parties yet" : "No matching parties") : "Loading..."}
                             </p>
                             {customersLoaded && customers.length > 0 && (
@@ -590,7 +779,7 @@ function NewOrderPageContent() {
                               idx === customerHighlight ? "bg-brand-50" : "hover:bg-gray-50"
                             }`}
                           >
-                            <div className="w-8 h-8 rounded-full bg-gray-100 text-gray-700 flex items-center justify-center text-xs font-bold shrink-0">
+                            <div className="w-8 h-8 rounded-lg bg-gray-100 text-gray-700 flex items-center justify-center text-xs font-bold shrink-0">
                               {c.partyName.charAt(0).toUpperCase()}
                             </div>
                             <div className="flex-1 min-w-0">
@@ -609,11 +798,11 @@ function NewOrderPageContent() {
                             type="button"
                             onMouseEnter={() => setCustomerHighlight(filtered.length)}
                             onClick={() => { setNewPartyName(customerSearch.trim()); setShowNewParty(true); setCustomerDropdownOpen(false); }}
-                            className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left border-t border-gray-100 transition-colors ${
+                            className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left border-t border-gray-200/70 transition-colors ${
                               customerHighlight === filtered.length ? "bg-brand-50" : "hover:bg-gray-50"
                             }`}
                           >
-                            <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center shrink-0">
+                            <div className="w-8 h-8 rounded-lg bg-brand-100 ring-1 ring-brand-200 text-brand-700 flex items-center justify-center shrink-0">
                               <UserPlus className="w-4 h-4" />
                             </div>
                             <div className="flex-1 min-w-0">
@@ -626,94 +815,170 @@ function NewOrderPageContent() {
                     )}
                   </>
                 )}
-                {/* Quick "Add new" shortcut when nothing typed */}
-                {!selected && !customerSearch && !customerDropdownOpen && (
-                  <button
-                    type="button"
-                    onClick={() => setShowNewParty(true)}
-                    className="mt-2 inline-flex items-center gap-1.5 text-xs text-brand-600 hover:text-brand-700 font-medium"
-                  >
-                    <UserPlus className="w-3.5 h-3.5" />
-                    {t("newOrder.addNewParty")}
-                  </button>
-                )}
-              </div>
-            );
-          })() : (
-            <div className="space-y-2.5 bg-brand-50/40 border border-brand-100 rounded-lg p-3">
-              <div className="flex items-center gap-2 text-xs text-brand-700 font-semibold mb-1">
-                <UserPlus className="w-3.5 h-3.5" />
-                Add a new party
-              </div>
-              <div className="relative">
-                <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-                <input
-                  type="text"
-                  value={newPartyName}
-                  onChange={(e) => setNewPartyName(e.target.value)}
-                  placeholder={t("newOrder.enterPartyName")}
-                  autoFocus
-                  className="w-full pl-9 pr-3 py-2.5 text-sm border-2 border-gray-300 rounded-lg focus:outline-none focus:border-brand-500 bg-white"
-                />
-              </div>
-              <div className="relative">
-                <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-                <input
-                  type="text"
-                  value={newPartyLocation}
-                  onChange={(e) => setNewPartyLocation(e.target.value)}
-                  placeholder={t("newOrder.locationOptional")}
-                  className="w-full pl-9 pr-3 py-2.5 text-sm border-2 border-gray-300 rounded-lg focus:outline-none focus:border-brand-500 bg-white"
-                />
-              </div>
-              <div className="flex gap-2 pt-1">
+                </div>
+                {/* Single "+" button on the side — opens the new-party modal.
+                    Replaces the two below-the-box links that used to be there. */}
                 <button
                   type="button"
-                  onClick={() => { setShowNewParty(false); setNewPartyName(""); setNewPartyLocation(""); }}
-                  className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-white transition-colors"
+                  onClick={() => setShowNewParty(true)}
+                  title={t("newOrder.addNewParty")}
+                  className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2.5 text-sm font-semibold text-brand-700 bg-brand-50 hover:bg-brand-100 border border-brand-200 rounded-xl transition-colors"
                 >
-                  {t("newOrder.backToList")}
+                  <UserPlus className="w-4 h-4" />
+                  <span className="hidden sm:inline">{t("newOrder.addNewParty")}</span>
+                </button>
+              </div>
+            );
+          })() : null}
+        </div>
+
+        {/* New-party modal — used by the side button AND the in-dropdown
+            "Add new: …" row. Keeps the party picker untouched while the user
+            fills in details. */}
+        {showNewParty && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+            onClick={() => {
+              setShowNewParty(false);
+              setNewPartyName("");
+              setNewPartyLocation("");
+              setNewPartyContactName("");
+              setNewPartyContactPhone("");
+              setNewPartyContactPosition("");
+            }}
+          >
+            <div
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-md border border-gray-200 overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
+                <h3 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+                  <UserPlus className="w-4 h-4 text-brand-600" />
+                  Add new party
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowNewParty(false);
+                    setNewPartyName("");
+                    setNewPartyLocation("");
+                    setNewPartyContactName("");
+                    setNewPartyContactPhone("");
+                    setNewPartyContactPosition("");
+                  }}
+                  className="p-1 text-gray-400 hover:text-gray-700 rounded"
+                  aria-label="Close"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="px-5 py-4 space-y-2.5">
+                <div className="relative">
+                  <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={newPartyName}
+                    onChange={(e) => setNewPartyName(e.target.value)}
+                    placeholder={t("newOrder.enterPartyName")}
+                    autoFocus
+                    className="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 bg-white placeholder:text-gray-400 transition-all"
+                  />
+                </div>
+                <div className="relative">
+                  <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={newPartyLocation}
+                    onChange={(e) => setNewPartyLocation(e.target.value)}
+                    placeholder={t("newOrder.locationOptional")}
+                    className="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 bg-white placeholder:text-gray-400 transition-all"
+                  />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-gray-100">
+                  <input
+                    type="text"
+                    value={newPartyContactName}
+                    onChange={(e) => setNewPartyContactName(e.target.value)}
+                    placeholder="Contact person name (optional)"
+                    className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 bg-white placeholder:text-gray-400 transition-all"
+                  />
+                  <input
+                    type="tel"
+                    value={newPartyContactPhone}
+                    onChange={(e) => setNewPartyContactPhone(e.target.value)}
+                    placeholder="Phone number (optional)"
+                    className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 bg-white placeholder:text-gray-400 transition-all"
+                  />
+                  <input
+                    type="text"
+                    value={newPartyContactPosition}
+                    onChange={(e) => setNewPartyContactPosition(e.target.value)}
+                    placeholder="Position / role (optional)"
+                    className="sm:col-span-2 w-full px-3 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 bg-white placeholder:text-gray-400 transition-all"
+                  />
+                </div>
+              </div>
+              <div className="px-5 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowNewParty(false);
+                    setNewPartyName("");
+                    setNewPartyLocation("");
+                    setNewPartyContactName("");
+                    setNewPartyContactPhone("");
+                    setNewPartyContactPosition("");
+                  }}
+                  className="px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 rounded-lg transition-colors"
+                >
+                  Cancel
                 </button>
                 <button
                   type="button"
                   onClick={handleCreateCustomer}
                   disabled={!newPartyName.trim()}
-                  className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 bg-brand-500 text-white text-sm font-medium rounded-lg hover:bg-brand-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-brand-500 hover:bg-brand-600 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Plus className="w-4 h-4" />
                   {t("newOrder.add")}
                 </button>
               </div>
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
-        {/* Order Items */}
+        {/* ── Order Items ────────────────────────────────────── */}
         <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <label className="text-sm font-semibold text-gray-900">
-              {t("newOrder.orderItems")} ({items.length})
-            </label>
+          <div className="flex items-center justify-between px-1">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-brand-50 ring-1 ring-brand-100 flex items-center justify-center">
+                <Plus className="w-4 h-4 text-brand-600" />
+              </div>
+              <label className="text-sm font-bold text-gray-900">
+                {t("newOrder.orderItems")}
+                <span className="text-gray-400 font-medium ml-1.5">({items.length})</span>
+              </label>
+            </div>
           </div>
 
           {items.map((item, idx) => (
-            <div key={item.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <div key={item.id} className="bg-white rounded-2xl border border-gray-200/80">
               {/* Item header */}
               <div
-                className="flex items-center justify-between px-4 py-3 bg-gray-50 cursor-pointer"
+                className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-gray-50 to-white border-b border-gray-200/70 rounded-t-2xl cursor-pointer hover:from-gray-100/60 transition-colors"
                 onClick={() => updateItem(item.id, { expanded: !item.expanded })}
               >
-                <div className="flex items-center gap-2">
-                  <span className="flex items-center justify-center w-6 h-6 rounded-full bg-brand-100 text-brand-700 text-xs font-bold">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="flex items-center justify-center w-6 h-6 rounded-lg bg-brand-100 text-brand-700 text-xs font-bold ring-1 ring-brand-200 flex-shrink-0">
                     {idx + 1}
                   </span>
-                  <span className="text-sm font-medium text-gray-700">
+                  <span className="text-sm font-semibold text-gray-800 truncate">
                     {item.productCategory
-                      ? tProduct(item.productCategory)
+                      ? (allCategories.find((c) => c.value === item.productCategory)?.label || item.productCategory)
                       : t("newOrder.selectProduct")}
                   </span>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1">
                   {items.length > 1 && (
                     <button
                       type="button"
@@ -721,7 +986,8 @@ function NewOrderPageContent() {
                         e.stopPropagation();
                         removeItem(item.id);
                       }}
-                      className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      className="p-1.5 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors active:scale-[0.97]"
+                      aria-label="Remove item"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -737,52 +1003,21 @@ function NewOrderPageContent() {
               {/* Item content */}
               {item.expanded && (
                 <div className="p-4 space-y-4">
-                  {/* Category selector */}
+                  {/* Unified category picker (built-ins + customs as one list) */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className="block text-[11px] uppercase tracking-wide font-semibold text-gray-500 mb-1.5">
                       {t("newOrder.productCategory")}
                     </label>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                      {visibleBuiltins.map((cat) => (
-                        <button
-                          key={cat.value}
-                          type="button"
-                          onClick={() => {
-                            if (cat.value !== item.productCategory) {
-                              updateItem(item.id, {
-                                productCategory: cat.value,
-                                productDetails: {},
-                              });
-                            }
-                          }}
-                          className={`px-3 py-2 text-sm rounded-lg border-2 font-medium transition-all ${
-                            item.productCategory === cat.value
-                              ? "border-brand-500 bg-brand-50 text-brand-700"
-                              : "border-gray-200 text-gray-600 hover:border-gray-300"
-                          }`}
-                        >
-                          {builtinLabelFor(cat.value)}
-                        </button>
-                      ))}
-                      {customCategories.map((cat) => (
-                        <button
-                          key={cat.id}
-                          type="button"
-                          onClick={() => {
-                            if (cat.name !== item.productCategory) {
-                              updateItem(item.id, { productCategory: cat.name as ProductCategory, productDetails: {} });
-                            }
-                          }}
-                          className={`px-3 py-2 text-sm rounded-lg border-2 font-medium transition-all ${
-                            item.productCategory === cat.name
-                              ? "border-purple-500 bg-purple-50 text-purple-700"
-                              : "border-gray-200 text-gray-600 hover:border-gray-300"
-                          }`}
-                        >
-                          {cat.name}
-                        </button>
-                      ))}
-                    </div>
+                    <CategoryPicker
+                      value={item.productCategory}
+                      categories={allCategories}
+                      onChange={(value) => {
+                        if (value !== item.productCategory) {
+                          updateItem(item.id, { productCategory: value as ProductCategory, productDetails: {} });
+                        }
+                      }}
+                      loaded={categoriesLoaded}
+                    />
                   </div>
 
                   {/* Product details form */}
@@ -803,10 +1038,10 @@ function NewOrderPageContent() {
                   })()}
 
                   {/* Rate & GST */}
-                  <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-100">
+                  <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-200/70">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                        {t("newOrder.rate")} <span className="text-gray-400 font-normal">{t("newOrder.optional")}</span>
+                      <label className="block text-[11px] uppercase tracking-wide font-semibold text-gray-500 mb-1.5">
+                        {t("newOrder.rate")} <span className="text-gray-400 font-normal normal-case">{t("newOrder.optional")}</span>
                       </label>
                       <div className="relative">
                         <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -815,13 +1050,13 @@ function NewOrderPageContent() {
                           value={item.rate}
                           onChange={(e) => updateItem(item.id, { rate: e.target.value })}
                           placeholder="0"
-                          className="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                          className="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 placeholder:text-gray-400 transition-all"
                         />
                       </div>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                        GST % <span className="text-gray-400 font-normal">{t("newOrder.optional")}</span>
+                      <label className="block text-[11px] uppercase tracking-wide font-semibold text-gray-500 mb-1.5">
+                        GST % <span className="text-gray-400 font-normal normal-case">{t("newOrder.optional")}</span>
                       </label>
                       <div className="relative">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400 font-medium">%</span>
@@ -832,34 +1067,35 @@ function NewOrderPageContent() {
                           placeholder="e.g. 18"
                           min="0"
                           max="100"
-                          className="w-full pl-8 pr-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                          className="w-full pl-8 pr-3 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 placeholder:text-gray-400 transition-all"
                         />
                       </div>
                     </div>
                   </div>
 
                   {/* Image Upload */}
-                  <div className="pt-2 border-t border-gray-100">
-                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                      {t("newOrder.designImage")} <span className="text-gray-400 font-normal">{t("newOrder.optional")}</span>
+                  <div className="pt-2 border-t border-gray-200/70">
+                    <label className="block text-[11px] uppercase tracking-wide font-semibold text-gray-500 mb-1.5">
+                      {t("newOrder.designImage")} <span className="text-gray-400 font-normal normal-case">{t("newOrder.optional")}</span>
                     </label>
                     {item.imagePreview ? (
                       <div className="relative inline-block">
                         <img
                           src={item.imagePreview}
                           alt="Preview"
-                          className="w-32 h-32 object-cover rounded-lg border border-gray-200"
+                          className="w-32 h-32 object-cover rounded-xl ring-1 ring-gray-200"
                         />
                         <button
                           type="button"
                           onClick={() => updateItem(item.id, { image: null, imagePreview: "" })}
-                          className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 transition-colors shadow-sm"
+                          className="absolute -top-2 -right-2 w-6 h-6 bg-rose-500 text-white rounded-full flex items-center justify-center hover:bg-rose-600 transition-colors shadow-sm active:scale-95"
+                          aria-label="Remove image"
                         >
                           <X className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     ) : (
-                      <label className="flex items-center justify-center gap-2 w-full py-3 border-2 border-dashed border-gray-300 rounded-lg text-sm text-gray-500 hover:border-brand-400 hover:text-brand-600 cursor-pointer transition-colors">
+                      <label className="flex items-center justify-center gap-2 w-full py-4 border-2 border-dashed border-gray-300 rounded-xl text-sm text-gray-500 hover:border-brand-400 hover:bg-brand-50/40 hover:text-brand-700 cursor-pointer transition-all">
                         <ImagePlus className="w-4 h-4" />
                         {t("newOrder.uploadImage")}
                         <input
@@ -887,32 +1123,35 @@ function NewOrderPageContent() {
           <button
             type="button"
             onClick={addItem}
-            className="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed border-gray-300 rounded-xl text-sm font-medium text-gray-500 hover:border-brand-400 hover:text-brand-600 transition-colors"
+            className="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed border-gray-300 rounded-2xl text-sm font-semibold text-gray-500 hover:border-brand-400 hover:bg-brand-50/40 hover:text-brand-700 transition-all active:scale-[0.99]"
           >
             <Plus className="w-4 h-4" />
             {t("newOrder.addAnother")}
           </button>
-
-
         </div>
 
-        {/* Priority & Delivery & Remarks */}
-        <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-4">
-          <label className="block text-sm font-semibold text-gray-900">
-            3. Additional Info
-          </label>
+        {/* ── Additional Info ──────────────────────────────────── */}
+        <div className="bg-white rounded-2xl border border-gray-200/80 p-4 sm:p-5 space-y-4">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-gray-50 ring-1 ring-gray-200 flex items-center justify-center">
+              <Send className="w-4 h-4 text-gray-600" />
+            </div>
+            <label className="text-sm font-bold text-gray-900">
+              Additional Info
+            </label>
+          </div>
 
           {/* Priority */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Priority</label>
+            <label className="block text-[11px] uppercase tracking-wide font-semibold text-gray-500 mb-1.5">Priority</label>
             <div className="flex gap-2">
               <button
                 type="button"
                 onClick={() => setPriority("NORMAL")}
-                className={`flex-1 px-3 py-2.5 text-sm rounded-lg border-2 font-medium transition-all ${
+                className={`flex-1 px-3 py-2.5 text-sm rounded-xl border font-semibold transition-all active:scale-[0.97] ${
                   priority === "NORMAL"
-                    ? "border-brand-500 bg-brand-50 text-brand-700"
-                    : "border-gray-200 text-gray-600"
+                    ? "border-brand-300 bg-brand-50 text-brand-700 ring-1 ring-brand-200 shadow-sm"
+                    : "border-gray-200 text-gray-600 bg-white hover:border-gray-300 hover:bg-gray-50"
                 }`}
               >
                 Normal
@@ -920,10 +1159,10 @@ function NewOrderPageContent() {
               <button
                 type="button"
                 onClick={() => setPriority("URGENT")}
-                className={`flex-1 px-3 py-2.5 text-sm rounded-lg border-2 font-medium transition-all ${
+                className={`flex-1 px-3 py-2.5 text-sm rounded-xl border font-semibold transition-all active:scale-[0.97] ${
                   priority === "URGENT"
-                    ? "border-red-500 bg-red-50 text-red-700"
-                    : "border-gray-200 text-gray-600"
+                    ? "border-rose-300 bg-rose-50 text-rose-700 ring-1 ring-rose-200 shadow-sm"
+                    : "border-gray-200 text-gray-600 bg-white hover:border-gray-300 hover:bg-gray-50"
                 }`}
               >
                 Urgent
@@ -932,36 +1171,36 @@ function NewOrderPageContent() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">
-              Delivery Deadline <span className="text-gray-400 font-normal">(optional)</span>
+            <label className="block text-[11px] uppercase tracking-wide font-semibold text-gray-500 mb-1.5">
+              Delivery Deadline <span className="text-gray-400 font-normal normal-case">(optional)</span>
             </label>
             <input
               type="date"
               value={deliveryDeadline}
               onChange={(e) => setDeliveryDeadline(e.target.value)}
-              className="w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+              className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 transition-all"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">
-              Remarks <span className="text-gray-400 font-normal">(optional)</span>
+            <label className="block text-[11px] uppercase tracking-wide font-semibold text-gray-500 mb-1.5">
+              Remarks <span className="text-gray-400 font-normal normal-case">(optional)</span>
             </label>
             <textarea
               value={remarks}
               onChange={(e) => { setIsDirty(true); setRemarks(e.target.value); }}
               rows={3}
               placeholder="Any special instructions..."
-              className="w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+              className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 placeholder:text-gray-400 resize-none transition-all"
             />
           </div>
         </div>
 
-        {/* Submit */}
+        {/* ── Submit ─────────────────────────────────────────── */}
         <button
           type="submit"
           disabled={submitting || !customerId || !items[0]?.productCategory}
-          className="w-full flex items-center justify-center gap-2 py-3 bg-brand-500 hover:bg-brand-600 active:bg-brand-700 text-white font-semibold rounded-xl text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full inline-flex items-center justify-center gap-2 py-3.5 bg-gradient-to-br from-brand-500 to-brand-600 hover:from-brand-600 hover:to-brand-700 active:from-brand-700 active:to-brand-800 text-white font-bold rounded-2xl text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-brand-500/20 hover:shadow-xl hover:shadow-brand-500/30 active:scale-[0.99]"
         >
           {submitting ? (
             <>

@@ -39,8 +39,8 @@ export async function POST(
       return NextResponse.json({ error: "Only image files are allowed" }, { status: 400 });
     }
 
-    if (file.size > 10 * 1024 * 1024) {
-      return NextResponse.json({ error: "File size must be under 10MB" }, { status: 400 });
+    if (file.size > 15 * 1024 * 1024) {
+      return NextResponse.json({ error: "File size must be under 15MB" }, { status: 400 });
     }
 
     const bytes = await file.arrayBuffer();

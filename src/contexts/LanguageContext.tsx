@@ -2,6 +2,9 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { Language, t as translate, TranslationKey, tStatus, tProduct, tRole } from "@/lib/translations";
+import { fetchPreferences, setPreference, getCachedPreference } from "@/lib/userPreferences";
+
+const PREF_LANG = "lang";
 
 interface LanguageContextType {
   lang: Language;
@@ -15,18 +18,35 @@ interface LanguageContextType {
 const LanguageContext = createContext<LanguageContextType | null>(null);
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
+  // Initial state MUST match server render (en). Local cache is applied in
+  // useEffect — anything client-only here breaks hydration.
   const [lang, setLangState] = useState<Language>("en");
 
   useEffect(() => {
-    const saved = localStorage.getItem("lang") as Language;
-    if (saved === "hi" || saved === "en") {
-      setLangState(saved);
-    }
+    // Apply cached lang synchronously on mount (client-only) to avoid the
+    // English-flash if the user previously selected Hindi.
+    const cached = getCachedPreference<Language>(PREF_LANG, "en");
+    if (cached === "hi" || cached === "en") setLangState(cached);
+
+    fetchPreferences().then((prefs) => {
+      let v = prefs[PREF_LANG] as Language | undefined;
+      if (v !== "en" && v !== "hi") {
+        // Legacy migration: pick up the old localStorage value if present
+        try {
+          const legacy = localStorage.getItem("lang") as Language | null;
+          if (legacy === "en" || legacy === "hi") {
+            v = legacy;
+            setPreference(PREF_LANG, legacy);
+          }
+        } catch {}
+      }
+      if (v === "en" || v === "hi") setLangState(v);
+    });
   }, []);
 
   const setLang = (newLang: Language) => {
     setLangState(newLang);
-    localStorage.setItem("lang", newLang);
+    setPreference(PREF_LANG, newLang);
   };
 
   return (

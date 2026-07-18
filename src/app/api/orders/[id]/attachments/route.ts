@@ -2,8 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { writeFile } from "fs/promises";
+import { writeFile, mkdir } from "fs/promises";
 import path from "path";
+
+export const runtime = "nodejs";
+export const maxDuration = 30;
 
 export async function GET(
   request: NextRequest,
@@ -53,9 +56,9 @@ export async function POST(
       );
     }
 
-    // Max 5MB
-    if (file.size > 5 * 1024 * 1024) {
-      return NextResponse.json({ error: "File size must be under 5MB" }, { status: 400 });
+    // Max 15MB — client-side compressor brings phone photos under ~1MB before this hits.
+    if (file.size > 15 * 1024 * 1024) {
+      return NextResponse.json({ error: "File size must be under 15MB" }, { status: 400 });
     }
 
     const userId = (session.user as any).id;
@@ -65,7 +68,9 @@ export async function POST(
     // Generate unique filename
     const ext = file.name.split(".").pop() || "jpg";
     const fileName = `${params.id}-${Date.now()}.${ext}`;
-    const filePath = path.join(process.cwd(), "public", "uploads", fileName);
+    const uploadDir = path.join(process.cwd(), "public", "uploads");
+    await mkdir(uploadDir, { recursive: true });
+    const filePath = path.join(uploadDir, fileName);
 
     await writeFile(filePath, buffer);
 

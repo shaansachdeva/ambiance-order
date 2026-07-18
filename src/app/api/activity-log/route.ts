@@ -8,9 +8,9 @@ export async function GET(request: NextRequest) {
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-
-  const userRole = (session.user as any).role;
-  if (userRole !== "ADMIN") {
+  // Server-side guard mirrors the sidebar restriction so PRODUCTION users can't
+  // bypass the UI by calling the API directly.
+  if ((session.user as any).role === "PRODUCTION") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

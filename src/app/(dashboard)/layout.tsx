@@ -24,7 +24,7 @@ export default async function DashboardLayout({
   return (
     <div className="min-h-screen bg-gray-50">
       <Sidebar user={user as any} />
-      <main className="md:ml-64 pb-20 md:pb-0 pt-14 md:pt-0">
+      <main className="md:ml-[var(--sb-w,16rem)] transition-[margin-left] duration-200 pb-20 md:pb-0 pt-14 md:pt-0">
         <div className="p-4 sm:p-6 lg:p-8">{children}</div>
       </main>
     </div>

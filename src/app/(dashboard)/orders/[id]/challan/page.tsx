@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { formatDate, safeParseJSON } from "@/lib/utils";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { ArrowLeft, Printer } from "lucide-react";
@@ -36,6 +36,7 @@ function getItemQuantity(productCategory: string, details: Record<string, any>):
 
 export default function ChallanPage() {
   const { id } = useParams();
+  const router = useRouter();
   const [order, setOrder] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const { t, tStatus, tProduct } = useLanguage();
@@ -80,12 +81,19 @@ export default function ChallanPage() {
       <div className="max-w-xl mx-auto">
         {/* Screen-only controls */}
         <div className="flex items-center gap-3 mb-4 no-print">
-          <Link
-            href={`/orders/${id}`}
+          {/* router.back() — Link would push a new history entry and cause the
+              browser Back button to bounce between this page and detail. */}
+          <button
+            type="button"
+            onClick={() => {
+              if (typeof window !== "undefined" && window.history.length > 1) router.back();
+              else router.push(`/orders/${id}`);
+            }}
             className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+            aria-label="Back"
           >
             <ArrowLeft className="w-5 h-5 text-gray-600" />
-          </Link>
+          </button>
           <h1 className="text-lg font-bold text-gray-900">{t("challan.title")}</h1>
           <button
             onClick={() => window.print()}

@@ -7,8 +7,7 @@ import {
   type LabelTemplate, type LabelField,
 } from "@/components/LabelPreviewRenderer";
 
-/* ── Barcode template from localStorage (ambiance_label_tpl_v5) ── */
-const STORAGE_KEY = "ambiance_label_tpl_v5";
+/* ── Barcode templates are fetched from /api/barcode-templates ── */
 
 interface SavedTemplate {
   id: string;
@@ -190,16 +189,25 @@ export default function OrderLabelModal({ order, onClose }: Props) {
 
   const previewRef = useRef<HTMLDivElement>(null);
 
-  /* Load templates from localStorage */
+  /* Load templates from server (per-account, syncs across devices) */
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const tpls: SavedTemplate[] = JSON.parse(raw);
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/barcode-templates", { cache: "no-store" });
+        if (!res.ok) return;
+        const rows = await res.json();
+        if (cancelled) return;
+        const tpls: SavedTemplate[] = rows.map((r: any) => {
+          let parsed: any = {};
+          try { parsed = JSON.parse(r.data || "{}"); } catch {}
+          return { ...parsed, id: r.id, name: r.name };
+        });
         setTemplates(tpls);
         if (tpls.length > 0) setSelectedTplId(tpls[0].id);
-      }
-    } catch {}
+      } catch {}
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   /* Set default label count to number of boxes */
@@ -396,8 +404,8 @@ ${labelHtml}
                 <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
                   Number of Labels
                 </label>
-                <input type="number" min={1} value={labelCount}
-                  onChange={(e) => setLabelCount(Math.max(1, parseInt(e.target.value) || 1))}
+                <input type="number" min={0} value={labelCount}
+                  onChange={(e) => setLabelCount(Math.max(0, parseInt(e.target.value) || 0))}
                   className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500" />
                 <p className="text-[11px] text-gray-400 mt-1">Default = boxes ordered</p>
               </div>

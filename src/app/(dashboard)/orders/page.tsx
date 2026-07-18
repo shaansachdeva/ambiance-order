@@ -7,10 +7,15 @@ import Link from "next/link";
 import OrderCard from "@/components/OrderCard";
 import { hasPermission, safeParseJSON } from "@/lib/utils";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useScrollRestoration } from "@/lib/useScrollRestoration";
 import { PRODUCT_CATEGORIES, ORDER_STATUSES } from "@/types";
 import type { UserRole, OrderStatus } from "@/types";
 import toast, { Toaster } from "react-hot-toast";
-import { PlusCircle, Search, Filter, Download, CheckSquare, Trash2, FileEdit, Clock, ChevronDown, ChevronUp } from "lucide-react";
+import {
+  PlusCircle, Search, Filter, Download, CheckSquare, Trash2,
+  FileEdit, Clock, ChevronDown, ChevronUp, Package, X,
+  ArrowUpDown, SlidersHorizontal,
+} from "lucide-react";
 
 function OrdersPageContent() {
   const { data: session, status: sessionStatus } = useSession();
@@ -23,44 +28,26 @@ function OrdersPageContent() {
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [sortBy, setSortBy] = useState("newest");
+  const [showFilters, setShowFilters] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const deleteToastRef = useRef<string | null>(null);
 
   // Draft management
   const [draftOrder, setDraftOrder] = useState<any>(null);
-  const [discardedDrafts, setDiscardedDrafts] = useState<any[]>([]);
-  const [showDiscarded, setShowDiscarded] = useState(false);
 
   useEffect(() => {
     try {
       const d = localStorage.getItem("order_draft");
       if (d) setDraftOrder(JSON.parse(d));
     } catch {}
-    try {
-      const dd = localStorage.getItem("discarded_drafts");
-      if (dd) setDiscardedDrafts(JSON.parse(dd));
-    } catch {}
+    // Clean up any lingering discarded-drafts history from older versions —
+    // we no longer keep this list, Discard is now a one-shot delete.
+    try { localStorage.removeItem("discarded_drafts"); } catch {}
   }, []);
 
   const deleteDraftPermanently = () => {
-    const snap = localStorage.getItem("order_draft");
-    if (snap) {
-      try {
-        const existing: any[] = JSON.parse(localStorage.getItem("discarded_drafts") || "[]");
-        const parsed = JSON.parse(snap);
-        existing.unshift({ ...parsed, discardedAt: new Date().toISOString() });
-        localStorage.setItem("discarded_drafts", JSON.stringify(existing.slice(0, 10)));
-        setDiscardedDrafts(existing.slice(0, 10));
-      } catch {}
-    }
-    localStorage.removeItem("order_draft");
+    try { localStorage.removeItem("order_draft"); } catch {}
     setDraftOrder(null);
-  };
-
-  const deleteDiscarded = (idx: number) => {
-    const next = discardedDrafts.filter((_, i) => i !== idx);
-    setDiscardedDrafts(next);
-    localStorage.setItem("discarded_drafts", JSON.stringify(next));
   };
 
   // Bulk selection
@@ -101,6 +88,11 @@ function OrdersPageContent() {
   useEffect(() => {
     fetchOrders();
   }, [fetchOrders]);
+
+  // Restore the scroll position after returning from an order detail/edit so
+  // users land back on the row they clicked into instead of the top of the list.
+  // `!loading` ensures the list has rendered before we scroll.
+  useScrollRestoration(!loading);
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -210,24 +202,46 @@ function OrdersPageContent() {
     window.open(`/api/orders/export?${params}`, "_blank");
   };
 
+  const activeFilterCount =
+    (statusFilter ? 1 : 0) + (categoryFilter ? 1 : 0) + (sortBy !== "newest" ? 1 : 0);
+
+  const clearAllFilters = () => {
+    setStatusFilter("");
+    setCategoryFilter("");
+    setSortBy("newest");
+  };
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 pb-24 md:pb-6">
       <Toaster position="top-right" />
 
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-gray-900">{t("orders.title")}</h1>
-        <div className="flex items-center gap-2">
-          {/* Export button */}
+      {/* ── Header ─────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-xl md:text-2xl font-bold text-gray-900 tracking-tight">
+            {t("orders.title")}
+          </h1>
+          {!loading && (
+            <p className="text-xs text-gray-500 mt-0.5">
+              {orders.length} {orders.length !== 1 ? t("orders.orders") : t("orders.order")}
+              {activeFilterCount > 0 && (
+                <span className="ml-1 text-brand-600 font-medium">
+                  · {activeFilterCount} filter{activeFilterCount !== 1 ? "s" : ""}
+                </span>
+              )}
+            </p>
+          )}
+        </div>
+        {/* Desktop-only header actions. Mobile uses the unified action row in the
+            filter bar below (so buttons don't end up scattered across two rows). */}
+        <div className="hidden md:flex items-center gap-2 flex-shrink-0">
           <button
             onClick={handleExport}
-            className="hidden md:inline-flex items-center gap-1.5 px-3 py-2 border border-gray-200 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 py-2 border border-gray-200 bg-white text-gray-600 text-sm font-medium rounded-xl hover:bg-gray-50 hover:border-gray-300 transition-all"
           >
             <Download className="w-4 h-4" />
             {t("orders.exportCSV")}
           </button>
-
-          {/* Bulk select toggle */}
           {canBulkUpdate && (
             <button
               onClick={() => {
@@ -235,21 +249,20 @@ function OrdersPageContent() {
                 setSelectedIds(new Set());
                 setShowBulkMenu(false);
               }}
-              className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg transition-colors border ${
+              className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-xl transition-all border ${
                 selectionMode
-                  ? "bg-brand-100 text-brand-700 border-brand-300"
-                  : "border-gray-200 text-gray-600 hover:bg-gray-50"
+                  ? "bg-brand-100 text-brand-700 border-brand-300 shadow-sm"
+                  : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:border-gray-300"
               }`}
             >
               <CheckSquare className="w-4 h-4" />
               {selectionMode ? t("common.cancel") : "Select"}
             </button>
           )}
-
           {canCreate && (
             <Link
               href="/orders/new"
-              className="hidden md:inline-flex items-center gap-2 px-4 py-2 bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium rounded-lg transition-colors"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-brand-500 hover:bg-brand-600 text-white text-sm font-semibold rounded-xl transition-all shadow-sm hover:shadow active:scale-[0.98]"
             >
               <PlusCircle className="w-4 h-4" />
               {t("orders.newOrder")}
@@ -258,18 +271,18 @@ function OrdersPageContent() {
         </div>
       </div>
 
-      {/* Bulk action bar */}
+      {/* ── Bulk action bar (sticky on mobile) ────────────────── */}
       {selectionMode && (
-        <div className="bg-brand-50 border border-brand-200 rounded-xl p-3 flex items-center justify-between gap-2 flex-wrap">
+        <div className="sticky top-16 md:top-0 z-30 bg-gradient-to-r from-brand-50 to-brand-100/50 border border-brand-200 rounded-2xl p-3 flex items-center justify-between gap-2 flex-wrap shadow-sm backdrop-blur-sm">
           <div className="flex items-center gap-3">
             <button
               onClick={toggleSelectAll}
-              className="text-xs text-brand-600 font-medium hover:text-brand-700"
+              className="text-xs text-brand-700 font-semibold hover:text-brand-800 underline-offset-2 hover:underline"
             >
               {selectedIds.size === orders.length ? t("orders.deselectAll") : t("orders.selectAll")}
             </button>
-            <span className="text-sm font-medium text-brand-700">
-              {selectedIds.size} {t("orders.selected")}
+            <span className="text-sm font-bold text-brand-800">
+              {selectedIds.size} <span className="font-medium text-brand-700">{t("orders.selected")}</span>
             </span>
           </div>
           {selectedIds.size > 0 && (
@@ -278,17 +291,17 @@ function OrdersPageContent() {
                 <button
                   onClick={() => setShowBulkMenu(!showBulkMenu)}
                   disabled={bulkUpdating}
-                  className="px-3 py-1.5 bg-brand-500 text-white text-xs font-medium rounded-lg hover:bg-brand-600 disabled:opacity-50"
+                  className="px-3 py-2 bg-brand-500 text-white text-xs font-semibold rounded-xl hover:bg-brand-600 disabled:opacity-50 shadow-sm transition-all active:scale-[0.97]"
                 >
                   {bulkUpdating ? t("orders.updating") : t("orders.changeStatus")}
                 </button>
                 {showBulkMenu && (
-                  <div className="absolute right-0 top-full mt-1 w-48 bg-white rounded-xl shadow-lg border border-gray-200 py-1 z-50">
+                  <div className="absolute right-0 top-full mt-1 w-52 bg-white rounded-xl shadow-lg border border-gray-200 py-1 z-50 overflow-hidden">
                     {ORDER_STATUSES.map((s) => (
                       <button
                         key={s.value}
                         onClick={() => handleBulkUpdate(s.value)}
-                        className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                        className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
                       >
                         {tStatus(s.value)}
                       </button>
@@ -300,7 +313,7 @@ function OrdersPageContent() {
                 <button
                   onClick={handleBulkDelete}
                   disabled={bulkUpdating}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500 text-white text-xs font-medium rounded-lg hover:bg-red-600 disabled:opacity-50"
+                  className="flex items-center gap-1.5 px-3 py-2 bg-rose-500 text-white text-xs font-semibold rounded-xl hover:bg-rose-600 disabled:opacity-50 shadow-sm transition-all active:scale-[0.97]"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   Delete
@@ -311,168 +324,305 @@ function OrdersPageContent() {
         </div>
       )}
 
-      {/* Filters */}
-      <div className="bg-white rounded-xl border border-gray-200 p-3 space-y-3">
-        <div className="flex items-center gap-2 text-sm text-gray-500">
-          <Filter className="w-4 h-4" />
-          <span className="font-medium">{t("orders.filters")}</span>
-          {/* Mobile export */}
-          <button
-            onClick={handleExport}
-            className="md:hidden ml-auto flex items-center gap-1 text-brand-600 text-xs font-medium"
-          >
-            <Download className="w-3.5 h-3.5" />
-            {t("orders.export")}
-          </button>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+      {/* ── Filter toolbar ─────────────────────────────────────── */}
+      <div className="space-y-2">
+        {/* Single inline row: search + 3 dropdowns (desktop) / search + toggle (mobile) */}
+        <div className="flex items-stretch gap-2">
+          {/* Search */}
+          <div className="relative flex-1 min-w-0">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={t("orders.searchPlaceholder")}
-              className="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+              className="w-full h-10 pl-10 pr-9 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 placeholder:text-gray-400 transition-all"
             />
+            {search && (
+              <button
+                onClick={() => setSearch("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg"
+                aria-label="Clear search"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
 
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white"
-          >
-            <option value="">{t("orders.allStatuses")}</option>
-            {ORDER_STATUSES.map((s) => (
-              <option key={s.value} value={s.value}>
-                {tStatus(s.value)}
-              </option>
-            ))}
-          </select>
+          {/* Desktop: inline dropdowns */}
+          <div className="hidden md:flex items-stretch gap-2 flex-shrink-0">
+            <div className="relative">
+              <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="h-10 pl-9 pr-8 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 appearance-none cursor-pointer transition-all hover:border-gray-300 max-w-[160px]"
+                title={t("orders.allStatuses")}
+              >
+                <option value="">{t("orders.allStatuses")}</option>
+                {ORDER_STATUSES.map((s) => (
+                  <option key={s.value} value={s.value}>{tStatus(s.value)}</option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+            </div>
 
-          <select
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-            className="w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white"
-          >
-            <option value="">{t("orders.allProducts")}</option>
-            {PRODUCT_CATEGORIES.map((c) => (
-              <option key={c.value} value={c.value}>
-                {tProduct(c.value)}
-              </option>
-            ))}
-          </select>
+            <div className="relative">
+              <Package className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+              <select
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+                className="h-10 pl-9 pr-8 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 appearance-none cursor-pointer transition-all hover:border-gray-300 max-w-[160px]"
+                title={t("orders.allProducts")}
+              >
+                <option value="">{t("orders.allProducts")}</option>
+                {PRODUCT_CATEGORIES.map((c) => (
+                  <option key={c.value} value={c.value}>{tProduct(c.value)}</option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+            </div>
 
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value)}
-            className="w-full sm:w-auto px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white"
-          >
-            <option value="newest">{t("orders.newestFirst")}</option>
-            <option value="oldest">{t("orders.oldestFirst")}</option>
-            <option value="orderId">{t("orders.orderId")}</option>
-            <option value="deadline">{t("orders.deadlineSoonest")}</option>
-            <option value="status">{t("orders.statusSort")}</option>
-          </select>
+            <div className="relative">
+              <ArrowUpDown className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                className="h-10 pl-9 pr-8 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 appearance-none cursor-pointer transition-all hover:border-gray-300 max-w-[150px]"
+                title="Sort"
+              >
+                <option value="newest">{t("orders.newestFirst")}</option>
+                <option value="oldest">{t("orders.oldestFirst")}</option>
+                <option value="orderId">{t("orders.orderId")}</option>
+                <option value="deadline">{t("orders.deadlineSoonest")}</option>
+                <option value="status">{t("orders.statusSort")}</option>
+              </select>
+              <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+            </div>
+          </div>
+
+          {/* Mobile: single uniform icon strip — filter / select / export, all 10×10 */}
+          <div className="md:hidden flex items-center gap-2 flex-shrink-0">
+            <button
+              onClick={() => setShowFilters((v) => !v)}
+              className={`relative inline-flex items-center justify-center h-10 w-10 rounded-xl border transition-all active:scale-[0.97] ${
+                showFilters || activeFilterCount > 0
+                  ? "bg-brand-50 text-brand-700 border-brand-200"
+                  : "bg-white text-gray-600 border-gray-200"
+              }`}
+              aria-label="Filters"
+            >
+              <SlidersHorizontal className="w-4 h-4" />
+              {activeFilterCount > 0 && (
+                <span className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 text-[9px] font-bold rounded-full bg-brand-500 text-white ring-2 ring-white">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
+            {canBulkUpdate && (
+              <button
+                onClick={() => {
+                  setSelectionMode(!selectionMode);
+                  setSelectedIds(new Set());
+                  setShowBulkMenu(false);
+                }}
+                className={`inline-flex items-center justify-center h-10 w-10 rounded-xl border transition-all active:scale-[0.97] ${
+                  selectionMode
+                    ? "bg-brand-50 text-brand-700 border-brand-200"
+                    : "bg-white text-gray-600 border-gray-200"
+                }`}
+                aria-label="Select"
+              >
+                {selectionMode ? <X className="w-4 h-4" /> : <CheckSquare className="w-4 h-4" />}
+              </button>
+            )}
+            <button
+              onClick={handleExport}
+              className="inline-flex items-center justify-center h-10 w-10 text-gray-600 bg-white border border-gray-200 rounded-xl active:scale-[0.97]"
+              aria-label={t("orders.export")}
+            >
+              <Download className="w-4 h-4" />
+            </button>
+          </div>
         </div>
+
+        {/* Mobile: collapsible dropdowns row */}
+        {showFilters && (
+          <div className="md:hidden grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div className="relative">
+              <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="w-full h-10 pl-9 pr-8 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 appearance-none cursor-pointer transition-all"
+              >
+                <option value="">{t("orders.allStatuses")}</option>
+                {ORDER_STATUSES.map((s) => (
+                  <option key={s.value} value={s.value}>{tStatus(s.value)}</option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+            </div>
+            <div className="relative">
+              <Package className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+              <select
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+                className="w-full h-10 pl-9 pr-8 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 appearance-none cursor-pointer transition-all"
+              >
+                <option value="">{t("orders.allProducts")}</option>
+                {PRODUCT_CATEGORIES.map((c) => (
+                  <option key={c.value} value={c.value}>{tProduct(c.value)}</option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+            </div>
+            <div className="relative">
+              <ArrowUpDown className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                className="w-full h-10 pl-9 pr-8 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500 appearance-none cursor-pointer transition-all"
+              >
+                <option value="newest">{t("orders.newestFirst")}</option>
+                <option value="oldest">{t("orders.oldestFirst")}</option>
+                <option value="orderId">{t("orders.orderId")}</option>
+                <option value="deadline">{t("orders.deadlineSoonest")}</option>
+                <option value="status">{t("orders.statusSort")}</option>
+              </select>
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+            </div>
+          </div>
+        )}
+
+        {/* Active filter chips + clear all */}
+        {activeFilterCount > 0 && (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {statusFilter && (
+              <button
+                onClick={() => setStatusFilter("")}
+                className="inline-flex items-center gap-1 px-2 py-1 bg-brand-50 text-brand-700 text-[11px] font-semibold rounded-lg ring-1 ring-brand-100 hover:bg-brand-100 transition-colors"
+              >
+                {tStatus(statusFilter)}
+                <X className="w-3 h-3" />
+              </button>
+            )}
+            {categoryFilter && (
+              <button
+                onClick={() => setCategoryFilter("")}
+                className="inline-flex items-center gap-1 px-2 py-1 bg-brand-50 text-brand-700 text-[11px] font-semibold rounded-lg ring-1 ring-brand-100 hover:bg-brand-100 transition-colors"
+              >
+                {tProduct(categoryFilter)}
+                <X className="w-3 h-3" />
+              </button>
+            )}
+            {sortBy !== "newest" && (
+              <button
+                onClick={() => setSortBy("newest")}
+                className="inline-flex items-center gap-1 px-2 py-1 bg-brand-50 text-brand-700 text-[11px] font-semibold rounded-lg ring-1 ring-brand-100 hover:bg-brand-100 transition-colors"
+              >
+                {sortBy === "oldest" && t("orders.oldestFirst")}
+                {sortBy === "orderId" && t("orders.orderId")}
+                {sortBy === "deadline" && t("orders.deadlineSoonest")}
+                {sortBy === "status" && t("orders.statusSort")}
+                <X className="w-3 h-3" />
+              </button>
+            )}
+            <button
+              onClick={clearAllFilters}
+              className="text-[11px] font-semibold text-gray-500 hover:text-gray-700 underline-offset-2 hover:underline ml-1"
+            >
+              Clear all
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Saved Draft Banner */}
+      {/* ── Saved Draft Banner ─────────────────────────────────── */}
       {draftOrder && canCreate && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start justify-between gap-3">
-          <div className="flex items-start gap-3">
-            <FileEdit className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
-            <div>
-              <p className="text-sm font-semibold text-amber-800">Unsaved Draft</p>
-              <p className="text-xs text-amber-600 mt-0.5">
+        <div className="bg-white border border-gray-200 rounded-lg px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-8 h-8 rounded-md bg-gray-100 flex items-center justify-center flex-shrink-0">
+              <FileEdit className="w-4 h-4 text-gray-600" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-gray-900 leading-tight">Unsaved draft</p>
+              <p className="text-[11px] text-gray-500 mt-0.5 leading-tight">
                 {draftOrder.savedAt
                   ? `Last saved ${new Date(draftOrder.savedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`
                   : "Draft found"
                 }
-                {draftOrder.customerId ? " — customer selected" : ""}
+                {draftOrder.customerId ? " · party selected" : ""}
               </p>
             </div>
           </div>
-          <div className="flex gap-2 shrink-0">
-            <Link
-              href="/orders/new"
-              className="px-3 py-1.5 text-xs font-semibold text-white bg-amber-600 rounded-lg hover:bg-amber-700"
-            >
-              Continue
-            </Link>
+          <div className="flex items-center gap-2 flex-shrink-0">
             <button
               onClick={deleteDraftPermanently}
-              className="px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-100 rounded-lg hover:bg-amber-200"
+              className="inline-flex items-center justify-center px-3 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
             >
               Discard
             </button>
+            <Link
+              href="/orders/new"
+              className="inline-flex items-center justify-center px-3 py-1.5 text-xs font-semibold text-white bg-gray-900 hover:bg-black rounded-md transition-colors leading-none"
+            >
+              Continue
+            </Link>
           </div>
         </div>
       )}
 
-      {/* Discarded Drafts */}
-      {discardedDrafts.length > 0 && (
-        <div>
-          <button
-            onClick={() => setShowDiscarded(!showDiscarded)}
-            className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 font-medium"
-          >
-            <Clock className="w-3.5 h-3.5" />
-            {discardedDrafts.length} discarded draft{discardedDrafts.length !== 1 ? "s" : ""}
-            {showDiscarded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-          </button>
-          {showDiscarded && (
-            <div className="mt-2 space-y-2">
-              {discardedDrafts.map((d, i) => (
-                <div key={i} className="bg-gray-50 border border-gray-200 rounded-xl p-3 flex items-center justify-between gap-2">
-                  <div>
-                    <p className="text-xs font-medium text-gray-700">
-                      Draft discarded {d.discardedAt ? new Date(d.discardedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}
-                    </p>
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      {d.items?.length || 0} item{d.items?.length !== 1 ? "s" : ""}
-                      {d.remarks ? ` · ${d.remarks.slice(0, 40)}` : ""}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => deleteDiscarded(i)}
-                    className="p-1.5 text-gray-400 hover:text-red-500 rounded-lg hover:bg-red-50"
-                    title="Remove from discarded list"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      {/* Discarded-drafts history removed — Discard is now a hard delete. */}
 
-      {/* Results Count */}
-      {!(loading || sessionStatus === "loading") && (
-        <p className="text-xs text-gray-500">
-          {t("orders.showing")} {orders.length} {orders.length !== 1 ? t("orders.orders") : t("orders.order")}
-        </p>
-      )}
-
-      {/* Orders List */}
+      {/* ── Orders List ────────────────────────────────────────── */}
       {loading || sessionStatus === "loading" ? (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {[...Array(5)].map((_, i) => (
-            <div key={i} className="h-24 bg-gray-200 rounded-xl animate-pulse" />
+            <div key={i} className="flex items-stretch bg-white rounded-2xl border border-gray-200/80 overflow-hidden animate-pulse">
+              <div className="w-1 bg-gray-200" />
+              <div className="flex-1 p-4 space-y-2">
+                <div className="flex items-center gap-2">
+                  <div className="h-4 w-20 bg-gray-200 rounded" />
+                  <div className="h-3 w-24 bg-gray-100 rounded" />
+                </div>
+                <div className="h-5 w-48 bg-gray-200 rounded" />
+                <div className="flex gap-3">
+                  <div className="h-3 w-16 bg-gray-100 rounded" />
+                  <div className="h-3 w-20 bg-gray-100 rounded" />
+                  <div className="h-3 w-24 bg-gray-100 rounded" />
+                </div>
+              </div>
+            </div>
           ))}
         </div>
       ) : orders.length === 0 ? (
-        <div className="text-center py-12 bg-white rounded-xl border border-gray-200">
-          <p className="text-gray-500 text-sm">{t("orders.noOrders")}</p>
-          {canCreate && (
+        <div className="flex flex-col items-center justify-center text-center py-12 sm:py-16 bg-white rounded-2xl border border-dashed border-gray-300">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-brand-50 to-brand-100/50 ring-1 ring-brand-100 flex items-center justify-center mb-4">
+            <Package className="w-6 h-6 text-brand-500" />
+          </div>
+          <p className="text-base font-semibold text-gray-900">{t("orders.noOrders")}</p>
+          <p className="text-xs text-gray-500 mt-1">
+            {activeFilterCount > 0
+              ? "Try adjusting your filters"
+              : "Create your first order to get started"}
+          </p>
+          {canCreate && activeFilterCount === 0 && (
             <Link
               href="/orders/new"
-              className="inline-flex items-center gap-2 mt-4 px-4 py-2 bg-brand-500 hover:bg-brand-600 text-white text-sm rounded-lg transition-colors"
+              className="inline-flex items-center gap-2 mt-5 px-4 py-2.5 bg-brand-500 hover:bg-brand-600 text-white text-sm font-semibold rounded-xl transition-all shadow-sm hover:shadow active:scale-[0.98]"
             >
               <PlusCircle className="w-4 h-4" />
               {t("orders.createFirst")}
             </Link>
+          )}
+          {activeFilterCount > 0 && (
+            <button
+              onClick={clearAllFilters}
+              className="mt-5 px-4 py-2 text-sm font-semibold text-brand-600 hover:text-brand-700 hover:bg-brand-50 rounded-xl transition-colors"
+            >
+              Clear all filters
+            </button>
           )}
         </div>
       ) : (
@@ -514,6 +664,7 @@ function OrdersPageContent() {
                 deliveryDeadline: order.deliveryDeadline,
                 priority: order.priority,
                 itemCount: order.items?.length || 0,
+                dispatchedAt: order.statusLogs?.[0]?.changedAt || null,
               }}
               showParty={showParty}
               selectionMode={selectionMode}
@@ -528,7 +679,8 @@ function OrdersPageContent() {
       {canCreate && (
         <Link
           href="/orders/new"
-          className="md:hidden fixed bottom-24 right-4 z-40 w-14 h-14 bg-brand-500 hover:bg-brand-600 text-white rounded-full shadow-lg flex items-center justify-center active:scale-95 transition-all"
+          className="md:hidden fixed bottom-24 right-4 z-40 w-14 h-14 bg-gradient-to-br from-brand-500 to-brand-600 hover:from-brand-600 hover:to-brand-700 text-white rounded-2xl shadow-lg shadow-brand-500/30 flex items-center justify-center active:scale-95 transition-all"
+          aria-label={t("orders.newOrder")}
         >
           <PlusCircle className="w-6 h-6" />
         </Link>
@@ -540,9 +692,9 @@ function OrdersPageContent() {
 export default function OrdersPage() {
   return (
     <Suspense fallback={
-      <div className="space-y-3">
+      <div className="space-y-2">
         {[...Array(5)].map((_, i) => (
-          <div key={i} className="h-24 bg-gray-200 rounded-xl animate-pulse" />
+          <div key={i} className="h-24 bg-gray-200 rounded-2xl animate-pulse" />
         ))}
       </div>
     }>

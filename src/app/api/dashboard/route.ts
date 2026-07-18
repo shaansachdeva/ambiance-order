@@ -20,6 +20,7 @@ export async function GET() {
     const [
       totalOrders,
       pendingOrders,
+      inProduction,
       todayProductionLogs,
       readyForDispatch,
       dispatched,
@@ -34,6 +35,11 @@ export async function GET() {
       // Pending orders (not dispatched, exclude soft-deleted)
       prisma.order.count({
         where: { status: { not: "DISPATCHED" }, deletedAt: null },
+      }),
+
+      // Orders currently IN_PRODUCTION (any item also counts via order.status sync)
+      prisma.order.count({
+        where: { status: "IN_PRODUCTION", deletedAt: null },
       }),
 
       // Today's production: orders that had status changed to IN_PRODUCTION today
@@ -133,6 +139,7 @@ export async function GET() {
     return NextResponse.json({
       totalOrders,
       pendingOrders,
+      inProduction,
       todayProduction: todayProductionLogs.length,
       readyForDispatch,
       dispatched,

@@ -12,9 +12,9 @@ model User {
   name          String
   username      String   @unique
   password      String
-  plainPassword String? // Stored for admin visibility
   role               String  // ADMIN, SALES, PRODUCTION, DISPATCH, ACCOUNTANT
   customPermissions  String? // JSON array of feature keys — if set, overrides role defaults
+  preferences        String? // JSON blob of per-user UI preferences (sidebar order, lang, etc.)
   active             Boolean  @default(true)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -34,6 +34,11 @@ model Customer {
   id        String   @id @default(cuid())
   partyName String
   location  String?
+  // Primary contact captured at party-creation time so future quotes/orders
+  // know who to call. All three are optional — partyName alone still works.
+  contactName     String?
+  contactPhone    String?
+  contactPosition String?
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -242,6 +247,17 @@ model BuiltinCategoryOverride {
   key    String  @id // "BOPP_TAPE", "BOPP_JUMBO", "THERMAL_ROLL", "BARCODE_LABEL", "COMPUTER_STATIONERY"
   hidden Boolean @default(false)
   label  String? // override display name; null = use default
+}
+
+// ─── Barcode / Label Templates ────────────────────────────────────────────────
+// Stored centrally so any user on any device sees the same library.
+model BarcodeTemplate {
+  id            String   @id @default(cuid())
+  name          String
+  data          String   // full SavedTemplate JSON (dimensions, fields, design, logo dataUrl, etc.)
+  createdById   String?  // who created it (nullable for migrated localStorage entries)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 
 // ─── Quotations ────────────────────────────────────────────────────────────────

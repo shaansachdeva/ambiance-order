@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { formatDateTime } from "@/lib/utils";
-import { Activity, Shield, ChevronLeft, ChevronRight, Filter } from "lucide-react";
+import { Activity, ChevronLeft, ChevronRight, Filter } from "lucide-react";
 import { useLanguage } from "@/contexts/LanguageContext";
 
 interface LogEntry {
@@ -28,7 +29,8 @@ interface UserOption {
 }
 
 export default function ActivityLogPage() {
-  const { data: session } = useSession();
+  const { data: session, status: sessionStatus } = useSession();
+  const router = useRouter();
   const { t, tStatus } = useLanguage();
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -42,12 +44,16 @@ export default function ActivityLogPage() {
 
   const userRole = (session?.user as any)?.role;
 
+  // PRODUCTION users aren't allowed in here. Sidebar already hides the link
+  // but this guard catches direct-URL access.
   useEffect(() => {
-    if (userRole !== "ADMIN") {
-      setLoading(false);
-      return;
-    }
+    if (sessionStatus !== "authenticated") return;
+    if (userRole === "PRODUCTION") router.replace("/");
+  }, [sessionStatus, userRole, router]);
 
+  useEffect(() => {
+    if (!session) return;
+    if (userRole === "PRODUCTION") return;
     setLoading(true);
     const params = new URLSearchParams();
     params.set("page", String(page));
@@ -64,17 +70,7 @@ export default function ActivityLogPage() {
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [userRole, page, filterUser, filterDate]);
-
-  if (userRole !== "ADMIN") {
-    return (
-      <div className="text-center py-12">
-        <Shield className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-        <p className="text-gray-500 font-medium">{t("activityLog.accessDenied")}</p>
-        <p className="text-sm text-gray-400 mt-1">{t("activityLog.adminOnly")}</p>
-      </div>
-    );
-  }
+  }, [session, page, filterUser, filterDate]);
 
   const getStatusChangeColor = (toStatus: string) => {
     switch (toStatus) {

@@ -17,10 +17,34 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const idsParam = searchParams.get("ids");
   const ids = idsParam ? idsParam.split(",").filter(Boolean) : [];
+  const from = searchParams.get("from");
+  const to = searchParams.get("to");
+  const salesPersonId = searchParams.get("salesPersonId");
 
   const where: any = {};
   if (ids.length > 0) where.id = { in: ids };
-  if (userRole === "SALES") where.salesPersonId = userId;
+
+  // Date range filter on createdAt (inclusive)
+  if (from || to) {
+    where.createdAt = {};
+    if (from) {
+      const start = new Date(from);
+      start.setHours(0, 0, 0, 0);
+      where.createdAt.gte = start;
+    }
+    if (to) {
+      const end = new Date(to);
+      end.setHours(23, 59, 59, 999);
+      where.createdAt.lte = end;
+    }
+  }
+
+  // SALES users always restricted to their own leads, regardless of any salesPersonId param
+  if (userRole === "SALES") {
+    where.salesPersonId = userId;
+  } else if (salesPersonId && salesPersonId !== "all") {
+    where.salesPersonId = salesPersonId;
+  }
 
   const leads = await prisma.lead.findMany({
     where,

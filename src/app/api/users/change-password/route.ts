@@ -51,7 +51,6 @@ export async function POST(request: NextRequest) {
       where: { id: userId },
       data: {
         password: hashedPassword,
-        plainPassword: newPassword,
       },
     });
 

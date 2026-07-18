@@ -230,11 +230,20 @@ export async function PATCH(
       });
     }
 
-    // If status was changed, cascade to all items
-    if (updateData.status) {
+    // If status was changed, cascade to all items + record a status log
+    if (updateData.status && updateData.status !== existingOrder.status) {
       await prisma.orderItem.updateMany({
         where: { orderId: orderId },
         data: { status: updateData.status },
+      });
+      await prisma.orderStatusLog.create({
+        data: {
+          orderId: orderId,
+          fromStatus: existingOrder.status,
+          toStatus: updateData.status,
+          notes: null,
+          changedById: (session.user as any).id,
+        },
       });
     }
 
